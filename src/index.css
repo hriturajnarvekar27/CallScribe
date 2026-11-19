@@ -1,0 +1,228 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root {
+    --font-sans: 'Inter', 'Noto Sans Devanagari', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-display: 'Plus Jakarta Sans', 'Inter', 'Noto Sans Devanagari', sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+    --cs-accent: #4f46e5;
+    --cs-accent-hover: #4338ca;
+    --cs-accent-fg: #ffffff;
+    --cs-glow: rgba(79, 70, 229, 0.16);
+    --cs-neon-border: rgba(99, 102, 241, 0.25);
+  }
+
+  html {
+    font-family: var(--font-sans);
+    color-scheme: light;
+  }
+
+  html.dark {
+    color-scheme: dark;
+    --cs-accent: #6366f1;
+    --cs-accent-hover: #4f46e5;
+    --cs-accent-fg: #ffffff;
+    --cs-glow: rgba(99, 102, 241, 0.22);
+    --cs-neon-border: rgba(99, 102, 241, 0.35);
+  }
+
+  html[data-theme='amoled-cyan'] {
+    --cs-accent: #00f0ff;
+    --cs-accent-hover: #06b6d4;
+    --cs-accent-fg: #020617;
+    --cs-glow: rgba(0, 240, 255, 0.32);
+    --cs-neon-border: rgba(0, 240, 255, 0.42);
+  }
+
+  html[data-theme='amoled-violet'] {
+    --cs-accent: #d946ef;
+    --cs-accent-hover: #c026d3;
+    --cs-accent-fg: #ffffff;
+    --cs-glow: rgba(217, 70, 239, 0.32);
+    --cs-neon-border: rgba(217, 70, 239, 0.42);
+  }
+
+  html[data-theme='amoled-emerald'] {
+    --cs-accent: #10b981;
+    --cs-accent-hover: #059669;
+    --cs-accent-fg: #022c22;
+    --cs-glow: rgba(16, 185, 129, 0.32);
+    --cs-neon-border: rgba(16, 185, 129, 0.42);
+  }
+
+  h1, h2, h3, .font-display {
+    font-family: var(--font-display);
+  }
+
+  .font-mono {
+    font-family: var(--font-mono);
+  }
+}
+
+/* Pure AMOLED Black canvas & surface overrides when AMOLED neon themes are active */
+html.amoled body,
+html.amoled .cs-canvas {
+  background-color: #000000 !important;
+}
+
+html.amoled .cs-surface {
+  background-color: rgba(6, 6, 9, 0.84) !important;
+  backdrop-filter: blur(12px);
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+html.amoled .cs-sidebar {
+  background-color: rgba(3, 3, 5, 0.88) !important;
+  backdrop-filter: blur(12px);
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+html.amoled .cs-accent-btn {
+  background-color: var(--cs-accent) !important;
+  color: var(--cs-accent-fg) !important;
+  box-shadow: 0 0 18px -2px var(--cs-glow);
+}
+
+html.amoled .cs-accent-btn:hover {
+  background-color: var(--cs-accent-hover) !important;
+}
+
+html.amoled .cs-neon-ring {
+  border-color: var(--cs-neon-border) !important;
+  box-shadow: 0 0 20px -6px var(--cs-glow);
+}
+
+html.amoled .cs-accent-text {
+  color: var(--cs-accent) !important;
+}
+
+html.amoled .cs-progress-fill {
+  background: linear-gradient(90deg, var(--cs-accent), #ffffff) !important;
+  box-shadow: 0 0 10px var(--cs-glow);
+}
+
+/* Dynamic Animations */
+@keyframes cs-shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(200%);
+  }
+}
+
+@keyframes cs-eq-bar {
+  0%, 100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes cs-neon-breathe {
+  0%, 100% {
+    box-shadow: 0 0 14px -4px var(--cs-glow);
+  }
+  50% {
+    box-shadow: 0 0 24px -2px var(--cs-glow);
+  }
+}
+
+@keyframes cs-aurora-drift-1 {
+  0%, 100% {
+    transform: translate3d(-6%, -4%, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(8%, 6%, 0) scale(1.12);
+  }
+}
+
+@keyframes cs-aurora-drift-2 {
+  0%, 100% {
+    transform: translate3d(6%, 5%, 0) scale(1.05);
+  }
+  50% {
+    transform: translate3d(-8%, -6%, 0) scale(0.95);
+  }
+}
+
+@keyframes cs-aurora-drift-3 {
+  0%, 100% {
+    transform: translate3d(0%, 8%, 0) scale(0.96);
+  }
+  50% {
+    transform: translate3d(-6%, -8%, 0) scale(1.08);
+  }
+}
+
+.cs-aurora-1 {
+  animation: cs-aurora-drift-1 18s ease-in-out infinite;
+}
+.cs-aurora-2 {
+  animation: cs-aurora-drift-2 23s ease-in-out infinite;
+}
+.cs-aurora-3 {
+  animation: cs-aurora-drift-3 28s ease-in-out infinite;
+}
+
+.cs-shimmer-bar {
+  position: relative;
+  overflow: hidden;
+}
+
+.cs-shimmer-bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 50%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+  animation: cs-shimmer 1.6s infinite linear;
+}
+
+.cs-eq-1 {
+  animation: cs-eq-bar 0.9s ease-in-out infinite;
+  transform-origin: bottom;
+}
+.cs-eq-2 {
+  animation: cs-eq-bar 0.7s ease-in-out 0.2s infinite;
+  transform-origin: bottom;
+}
+.cs-eq-3 {
+  animation: cs-eq-bar 1.05s ease-in-out 0.4s infinite;
+  transform-origin: bottom;
+}
+
+html.amoled .cs-neon-breathe {
+  animation: cs-neon-breathe 3s ease-in-out infinite;
+}
+
+/* Subtle custom scrollbars */
+.cs-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.cs-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.cs-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgba(113, 113, 122, 0.28);
+  border-radius: 9999px;
+}
+
+.cs-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(113, 113, 122, 0.5);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

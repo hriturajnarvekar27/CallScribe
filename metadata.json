@@ -1,0 +1,8 @@
+{
+  "name": "CallScribe",
+  "description": "Turn recorded client calls into accurate transcripts, structured summaries, meeting notes, action items, and client analysis.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
