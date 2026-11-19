@@ -3,16 +3,37 @@ import {
   AppSettings,
   ExportFormat,
   Job,
+  JobAnalysis,
   JobStatus,
+  NoteSection,
   RegenerateSection,
+  Speaker,
   TranscriptSegment,
   UploadJobPayload,
 } from './types';
 import { downloadMockExport, SubtitleBuildOptions } from './utils/exportMock';
-import { getDistinctSpeakerColor } from './utils/format';
+import { getDistinctSpeakerColor, validateMediaFile } from './utils/format';
 import { getMockAudioUrl } from './utils/mockAudio';
 
 const SETTINGS_STORAGE_KEY = 'callscribe_settings_v2';
+
+export class ApiError extends Error {
+  readonly status?: number;
+  readonly isAborted: boolean;
+  readonly isNetworkError: boolean;
+
+  constructor(
+    message: string,
+    status?: number,
+    options?: { isAborted?: boolean; isNetworkError?: boolean }
+  ) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.isAborted = Boolean(options?.isAborted);
+    this.isNetworkError = Boolean(options?.isNetworkError);
+  }
+}
 
 export const DEFAULT_SETTINGS: AppSettings = {
   defaultLanguage: 'auto',
@@ -66,15 +87,80 @@ export function getEnvApiBaseUrl(): string {
   return (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? '';
 }
 
+export interface ApiBaseUrlValidation {
+  valid: boolean;
+  normalized: string;
+  error?: string;
+}
+
+export function validateApiBaseUrl(raw: string): ApiBaseUrlValidation {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return { valid: true, normalized: '' };
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return {
+      valid: false,
+      normalized: trimmed,
+      error: 'Invalid API base URL. Expected an http:// or https:// URL (e.g. https://api.example.com).',
+    };
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return {
+      valid: false,
+      normalized: trimmed,
+      error: 'API base URL must use http:// or https://.',
+    };
+  }
+
+  if (parsed.username || parsed.password) {
+    return {
+      valid: false,
+      normalized: trimmed,
+      error: 'API base URL must not embed credentials.',
+    };
+  }
+
+  if (parsed.search || parsed.hash) {
+    return {
+      valid: false,
+      normalized: trimmed,
+      error: 'API base URL must not contain query parameters or hash fragments.',
+    };
+  }
+
+  const normalized = `${parsed.origin}${parsed.pathname}`.replace(/\/+$/, '');
+  return { valid: true, normalized };
+}
+
 export function getEffectiveApiBaseUrl(): string {
   const settings = loadStoredSettings();
   const override = settings.apiBaseUrl.trim();
   const base = override || getEnvApiBaseUrl();
-  return base.replace(/\/+$/, '');
+  if (!base) return '';
+  const checked = validateApiBaseUrl(base);
+  return checked.valid ? checked.normalized : base.replace(/\/+$/, '');
 }
 
 export function isMockMode(): boolean {
   return getEffectiveApiBaseUrl() === '';
+}
+
+function requireValidatedApiBaseUrl(): string {
+  const raw = getEffectiveApiBaseUrl();
+  if (!raw) {
+    throw new ApiError('Live API base URL is not configured.');
+  }
+  const checked = validateApiBaseUrl(raw);
+  if (!checked.valid) {
+    throw new ApiError(checked.error ?? 'Invalid API base URL configured.');
+  }
+  return checked.normalized;
 }
 
 // ---------------------------------------------------------------------------
@@ -297,43 +383,324 @@ function advanceMockJobs(): void {
 }
 
 // ---------------------------------------------------------------------------
-// API Helpers
+// Response Validation, Normalization & Error Formatting
 // ---------------------------------------------------------------------------
 
-async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const baseUrl = getEffectiveApiBaseUrl();
-  const res = await fetch(`${baseUrl}${path}`, {
-    ...init,
-    headers: {
-      ...(init?.body && !(init.body instanceof FormData)
-        ? { 'Content-Type': 'application/json' }
-        : {}),
-      ...(init?.headers ?? {}),
-    },
-  });
+const VALID_JOB_STATUSES = new Set<JobStatus>([
+  'queued',
+  'extracting_audio',
+  'transcribing',
+  'analyzing',
+  'done',
+  'failed',
+]);
+
+function getDefaultHttpErrorMessage(status: number): string {
+  if (status === 400) return 'Invalid request parameters (400).';
+  if (status === 404) return 'Recording not found (404).';
+  if (status === 413) return 'Uploaded file exceeds the backend size limit (413).';
+  if (status === 422) return 'Request validation failed (422).';
+  if (status >= 500) return `Server error (${status}). Please try again later.`;
+  return `Request failed (${status}).`;
+}
+
+function sanitizeErrorText(raw: string): string {
+  const withoutTrace = raw
+    .split(/\r?\nTraceback \(most recent call last\):/i)[0]
+    .split(/\r?\n\s+at\s+/)[0]
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!withoutTrace) return '';
+  return withoutTrace.length > 220 ? `${withoutTrace.slice(0, 217)}...` : withoutTrace;
+}
+
+function extractErrorMessage(status: number, bodyText: string): string {
+  const fallback = getDefaultHttpErrorMessage(status);
+  const trimmed = bodyText.trim();
+  if (!trimmed) return fallback;
+
+  const lower = trimmed.toLowerCase();
+  if (lower.startsWith('<!doctype') || lower.startsWith('<html')) {
+    return fallback;
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as {
+      detail?: unknown;
+      error?: unknown;
+      message?: unknown;
+    };
+
+    if (typeof parsed.detail === 'string') {
+      return sanitizeErrorText(parsed.detail) || fallback;
+    }
+
+    if (Array.isArray(parsed.detail)) {
+      const details = parsed.detail
+        .slice(0, 3)
+        .map((item) => {
+          if (typeof item === 'string') return sanitizeErrorText(item);
+          if (item && typeof item === 'object') {
+            const entry = item as { loc?: unknown[]; msg?: unknown };
+            const locParts = Array.isArray(entry.loc)
+              ? entry.loc
+                  .filter((p) => p !== 'body' && p !== 'query' && p !== 'path')
+                  .map((p) => String(p))
+              : [];
+            const msg = typeof entry.msg === 'string' ? sanitizeErrorText(entry.msg) : '';
+            if (locParts.length > 0 && msg) return `${locParts.join('.')}: ${msg}`;
+            return msg;
+          }
+          return '';
+        })
+        .filter(Boolean);
+      if (details.length > 0) return details.join('; ');
+    }
+
+    if (typeof parsed.error === 'string') {
+      return sanitizeErrorText(parsed.error) || fallback;
+    }
+    if (typeof parsed.message === 'string') {
+      return sanitizeErrorText(parsed.message) || fallback;
+    }
+  } catch {
+    // Plain text response body
+  }
+
+  return sanitizeErrorText(trimmed) || fallback;
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === 'string');
+}
+
+function normalizeSpeakers(rawSpeakers: unknown): Speaker[] {
+  if (!Array.isArray(rawSpeakers)) return [];
+  return rawSpeakers
+    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+    .map((item, idx) => ({
+      id: typeof item.id === 'string' && item.id.trim() ? item.id : `spk-${idx + 1}`,
+      name:
+        typeof item.name === 'string' && item.name.trim()
+          ? item.name
+          : `Speaker ${idx + 1}`,
+      color:
+        typeof item.color === 'string' && item.color.trim()
+          ? item.color
+          : getDistinctSpeakerColor(idx),
+    }));
+}
+
+function normalizeTranscript(rawTranscript: unknown): TranscriptSegment[] | undefined {
+  if (rawTranscript === undefined || rawTranscript === null) return undefined;
+  if (!Array.isArray(rawTranscript)) {
+    throw new ApiError('Malformed response: job transcript must be an array.');
+  }
+  return rawTranscript
+    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+    .map((item, idx) => ({
+      id: typeof item.id === 'string' && item.id.trim() ? item.id : `seg-${idx + 1}`,
+      start: typeof item.start === 'number' && Number.isFinite(item.start) ? Math.max(0, item.start) : 0,
+      end: typeof item.end === 'number' && Number.isFinite(item.end) ? Math.max(0, item.end) : 0,
+      speakerId:
+        typeof item.speakerId === 'string' && item.speakerId.trim()
+          ? item.speakerId
+          : 'spk-1',
+      text: typeof item.text === 'string' ? item.text : '',
+    }));
+}
+
+function normalizeNotes(rawNotes: unknown): NoteSection[] | undefined {
+  if (rawNotes === undefined || rawNotes === null) return undefined;
+  if (!Array.isArray(rawNotes)) return undefined;
+  return rawNotes
+    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+    .map((item) => ({
+      heading: typeof item.heading === 'string' ? item.heading : 'Notes',
+      bullets: asStringArray(item.bullets),
+    }));
+}
+
+function normalizeAnalysis(rawAnalysis: unknown): JobAnalysis | undefined {
+  if (rawAnalysis === undefined || rawAnalysis === null) return undefined;
+  if (typeof rawAnalysis !== 'object') return undefined;
+  const obj = rawAnalysis as Record<string, unknown>;
+  const sentiment =
+    obj.sentiment === 'positive' || obj.sentiment === 'neutral' || obj.sentiment === 'negative'
+      ? obj.sentiment
+      : 'neutral';
+
+  return {
+    sentiment,
+    sentimentNote: typeof obj.sentimentNote === 'string' ? obj.sentimentNote : '',
+    topics: asStringArray(obj.topics),
+    decisions: asStringArray(obj.decisions),
+    concerns: asStringArray(obj.concerns),
+    risks: asStringArray(obj.risks),
+    nextSteps: asStringArray(obj.nextSteps),
+  };
+}
+
+function normalizeJob(raw: unknown, baseUrl?: string): Job {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new ApiError('Malformed recording payload received from backend API.');
+  }
+  const obj = raw as Record<string, unknown>;
+  if (typeof obj.id !== 'string' || !obj.id.trim()) {
+    throw new ApiError('Malformed recording payload: missing recording id.');
+  }
+
+  const rawStatus = typeof obj.status === 'string' ? (obj.status as JobStatus) : 'queued';
+  const status: JobStatus = VALID_JOB_STATUSES.has(rawStatus) ? rawStatus : 'queued';
+
+  const rawProgress = typeof obj.progress === 'number' && Number.isFinite(obj.progress)
+    ? obj.progress
+    : status === 'done'
+      ? 100
+      : 0;
+  const progress = Math.max(0, Math.min(100, Math.round(rawProgress)));
+
+  const durationSec =
+    typeof obj.durationSec === 'number' && Number.isFinite(obj.durationSec)
+      ? Math.max(0, obj.durationSec)
+      : 0;
+
+  let audioUrl = typeof obj.audioUrl === 'string' && obj.audioUrl.trim() ? obj.audioUrl : undefined;
+  if (audioUrl && baseUrl && audioUrl.startsWith('/')) {
+    audioUrl = `${baseUrl}${audioUrl}`;
+  }
+
+  return {
+    id: obj.id,
+    title: typeof obj.title === 'string' && obj.title.trim() ? obj.title : 'Untitled recording',
+    createdAt:
+      typeof obj.createdAt === 'string' && obj.createdAt.trim()
+        ? obj.createdAt
+        : new Date().toISOString(),
+    durationSec,
+    language: typeof obj.language === 'string' && obj.language.trim() ? obj.language : 'auto',
+    status,
+    progress,
+    error: typeof obj.error === 'string' && obj.error.trim() ? sanitizeErrorText(obj.error) : undefined,
+    audioUrl,
+    client: typeof obj.client === 'string' ? obj.client : undefined,
+    tags: Array.isArray(obj.tags) ? asStringArray(obj.tags) : undefined,
+    pinned: typeof obj.pinned === 'boolean' ? obj.pinned : undefined,
+    speakers: normalizeSpeakers(obj.speakers),
+    transcript: normalizeTranscript(obj.transcript),
+    summary: typeof obj.summary === 'string' ? obj.summary : undefined,
+    keyPoints: Array.isArray(obj.keyPoints) ? asStringArray(obj.keyPoints) : undefined,
+    notes: normalizeNotes(obj.notes),
+    analysis: normalizeAnalysis(obj.analysis),
+  };
+}
+
+function normalizeJobList(raw: unknown, baseUrl?: string): Job[] {
+  if (!Array.isArray(raw)) {
+    throw new ApiError('Malformed response: expected an array of recordings.');
+  }
+  return raw.map((item) => normalizeJob(item, baseUrl));
+}
+
+function parseContentDispositionFilename(
+  disposition: string | null,
+  fallback: string
+): string {
+  if (!disposition) return fallback;
+
+  let rawName: string | null = null;
+
+  // Prefer RFC 5987 UTF-8 encoded filename*
+  const extMatch = disposition.match(/filename\*\s*=\s*(?:UTF-8''|[^']*'')([^;\r\n]+)/i);
+  if (extMatch?.[1]) {
+    try {
+      rawName = decodeURIComponent(extMatch[1].trim().replace(/^["']|["']$/g, ''));
+    } catch {
+      rawName = extMatch[1].trim();
+    }
+  }
+
+  if (!rawName) {
+    const basicMatch = disposition.match(/filename\s*=\s*"([^"]+)"|filename\s*=\s*([^;\r\n]+)/i);
+    rawName = (basicMatch?.[1] ?? basicMatch?.[2] ?? '').trim();
+  }
+
+  if (!rawName) return fallback;
+
+  const cleaned = rawName
+    .replace(/[/\\<>:"|?*\x00-\x1f]/g, '_')
+    .replace(/^\.+/, '')
+    .trim();
+
+  return cleaned || fallback;
+}
+
+async function apiFetch<T>(
+  path: string,
+  init?: RequestInit & { allowEmpty?: boolean }
+): Promise<T> {
+  const { allowEmpty = false, ...fetchInit } = init ?? {};
+  const baseUrl = requireValidatedApiBaseUrl();
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}${path}`, {
+      ...fetchInit,
+      headers: {
+        ...(fetchInit.body && !(fetchInit.body instanceof FormData)
+          ? { 'Content-Type': 'application/json' }
+          : {}),
+        ...(fetchInit.headers ?? {}),
+      },
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new ApiError('Request cancelled', 0, { isAborted: true });
+    }
+    throw new ApiError(
+      `Cannot reach the backend API at ${baseUrl}. Check that the server is running and CORS is enabled.`,
+      0,
+      { isNetworkError: true }
+    );
+  }
 
   if (!res.ok) {
-    let message = `Request failed (${res.status})`;
+    let bodyText = '';
     try {
-      const text = await res.text();
-      if (text) {
-        try {
-          const json = JSON.parse(text) as { error?: string; message?: string };
-          message = json.error || json.message || text;
-        } catch {
-          message = text;
-        }
-      }
+      bodyText = await res.text();
     } catch {
-      // ignore
+      bodyText = '';
     }
-    throw new Error(message);
+    throw new ApiError(extractErrorMessage(res.status, bodyText), res.status);
   }
 
   if (res.status === 204) {
     return undefined as T;
   }
-  return (await res.json()) as T;
+
+  const contentType = res.headers.get('content-type')?.toLowerCase() ?? '';
+  if (contentType.includes('text/html')) {
+    throw new ApiError(
+      'Received an HTML page instead of JSON from the API endpoint. Check your API base URL.',
+      res.status
+    );
+  }
+
+  const rawText = await res.text();
+  if (!rawText.trim()) {
+    if (allowEmpty) {
+      return undefined as T;
+    }
+    throw new ApiError('Empty JSON response from backend API.', res.status);
+  }
+
+  try {
+    return JSON.parse(rawText) as T;
+  } catch {
+    throw new ApiError('Malformed JSON response from backend API.', res.status);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -341,6 +708,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 // ---------------------------------------------------------------------------
 
 export interface UploadController {
+  supportsPause: boolean;
   pause: () => void;
   resume: () => void;
   cancel: () => void;
@@ -348,13 +716,20 @@ export interface UploadController {
 
 /**
  * POST /api/jobs
- * Multipart upload using XMLHttpRequest with optional pause/cancel handle for Upload Tray.
+ * Multipart upload using XMLHttpRequest with upload progress and cancellation.
+ * Note: Native XMLHttpRequest cannot pause an active HTTP request stream;
+ * pause/resume is available only in Mock Mode (supportsPause: true).
  */
 export function createJob(
   payload: UploadJobPayload,
   onUploadProgress?: (percent: number) => void,
   registerController?: (ctrl: UploadController) => void
 ): Promise<{ jobId: string }> {
+  const fileError = validateMediaFile(payload.file);
+  if (fileError) {
+    return Promise.reject(new ApiError(fileError, 400));
+  }
+
   if (isMockMode()) {
     return new Promise((resolve, reject) => {
       let progress = 0;
@@ -419,6 +794,7 @@ export function createJob(
       }, 220);
 
       registerController?.({
+        supportsPause: true,
         pause: () => {
           paused = true;
         },
@@ -428,24 +804,31 @@ export function createJob(
         cancel: () => {
           cancelled = true;
           window.clearInterval(timer);
-          reject(new Error('Upload cancelled'));
+          reject(new ApiError('Upload cancelled', 0, { isAborted: true }));
         },
       });
     });
   }
 
+  let baseUrl: string;
+  try {
+    baseUrl = requireValidatedApiBaseUrl();
+  } catch (err) {
+    return Promise.reject(err);
+  }
+
   return new Promise((resolve, reject) => {
-    const baseUrl = getEffectiveApiBaseUrl();
     const xhr = new XMLHttpRequest();
     xhr.open('POST', `${baseUrl}/api/jobs`, true);
 
     registerController?.({
+      supportsPause: false,
       pause: () => {
-        // Native XHR cannot pause mid-stream; cancel instead on live HTTP
-        xhr.abort();
+        // Native XMLHttpRequest cannot pause an in-flight HTTP multipart stream.
+        // Intentionally a no-op so an active upload is not accidentally aborted.
       },
       resume: () => {
-        // Handled via retry in UploadTray for live HTTP
+        // Not supported on native XMLHttpRequest; Retry starts a fresh upload.
       },
       cancel: () => {
         xhr.abort();
@@ -453,31 +836,46 @@ export function createJob(
     });
 
     xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable && onUploadProgress) {
-        const pct = Math.round((event.loaded / event.total) * 100);
+      if (event.lengthComputable && event.total > 0 && onUploadProgress) {
+        const pct = Math.min(100, Math.round((event.loaded / event.total) * 100));
         onUploadProgress(pct);
       }
     };
 
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
+        onUploadProgress?.(100);
         try {
-          const data = JSON.parse(xhr.responseText) as { jobId: string };
-          resolve(data);
+          const data = JSON.parse(xhr.responseText) as { jobId?: unknown };
+          if (!data || typeof data.jobId !== 'string' || !data.jobId.trim()) {
+            reject(new ApiError('Malformed upload response: missing jobId.', xhr.status));
+            return;
+          }
+          resolve({ jobId: data.jobId });
         } catch {
-          reject(new Error('Invalid JSON response from server'));
+          reject(new ApiError('Invalid JSON response from upload server.', xhr.status));
         }
       } else {
-        reject(new Error(xhr.responseText || `Upload failed with status ${xhr.status}`));
+        reject(new ApiError(extractErrorMessage(xhr.status, xhr.responseText), xhr.status));
       }
     };
 
     xhr.onabort = () => {
-      reject(new Error('Upload cancelled'));
+      reject(new ApiError('Upload cancelled', 0, { isAborted: true }));
     };
 
     xhr.onerror = () => {
-      reject(new Error('Network error while uploading media file'));
+      reject(
+        new ApiError(
+          `Network error while uploading media file to ${baseUrl}. Check connectivity and CORS configuration.`,
+          0,
+          { isNetworkError: true }
+        )
+      );
+    };
+
+    xhr.ontimeout = () => {
+      reject(new ApiError('Upload request timed out.', 0, { isNetworkError: true }));
     };
 
     const formData = new FormData();
@@ -495,7 +893,7 @@ export function createJob(
 /**
  * GET /api/jobs -> Job[] (list view, no transcript)
  */
-export async function listJobs(): Promise<Job[]> {
+export async function listJobs(signal?: AbortSignal): Promise<Job[]> {
   if (isMockMode()) {
     advanceMockJobs();
     await new Promise((r) => setTimeout(r, 140));
@@ -507,35 +905,39 @@ export async function listJobs(): Promise<Job[]> {
     }));
   }
 
-  return apiFetch<Job[]>('/api/jobs');
+  const baseUrl = requireValidatedApiBaseUrl();
+  const raw = await apiFetch<unknown>('/api/jobs', { signal });
+  return normalizeJobList(raw, baseUrl);
 }
 
 /**
  * Full-dataset fetch used for Command Palette transcript search & cross-call views.
  */
-export async function listFullJobsForWorkspace(): Promise<Job[]> {
+export async function listFullJobsForWorkspace(signal?: AbortSignal): Promise<Job[]> {
   if (isMockMode()) {
     advanceMockJobs();
     return mockJobs.map((j) => structuredClone(j));
   }
-  return listJobs();
+  return listJobs(signal);
 }
 
 /**
  * GET /api/jobs/{id} -> Job (full)
  */
-export async function getJob(id: string): Promise<Job> {
+export async function getJob(id: string, signal?: AbortSignal): Promise<Job> {
   if (isMockMode()) {
     advanceMockJobs();
     await new Promise((r) => setTimeout(r, 100));
     const found = mockJobs.find((j) => j.id === id);
     if (!found) {
-      throw new Error('Recording not found');
+      throw new ApiError('Recording not found', 404);
     }
     return structuredClone(found);
   }
 
-  return apiFetch<Job>(`/api/jobs/${encodeURIComponent(id)}`);
+  const baseUrl = requireValidatedApiBaseUrl();
+  const raw = await apiFetch<unknown>(`/api/jobs/${encodeURIComponent(id)}`, { signal });
+  return normalizeJob(raw, baseUrl);
 }
 
 export type PatchJobBody = Partial<
@@ -550,7 +952,7 @@ export async function patchJob(id: string, body: PatchJobBody): Promise<Job> {
     await new Promise((r) => setTimeout(r, 120));
     const idx = mockJobs.findIndex((j) => j.id === id);
     if (idx === -1) {
-      throw new Error('Recording not found');
+      throw new ApiError('Recording not found', 404);
     }
     const updated: Job = {
       ...mockJobs[idx],
@@ -560,20 +962,22 @@ export async function patchJob(id: string, body: PatchJobBody): Promise<Job> {
     return structuredClone(updated);
   }
 
-  return apiFetch<Job>(`/api/jobs/${encodeURIComponent(id)}`, {
+  const baseUrl = requireValidatedApiBaseUrl();
+  const raw = await apiFetch<unknown>(`/api/jobs/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     body: JSON.stringify(body),
   });
+  return normalizeJob(raw, baseUrl);
 }
 
 /**
- * Retry / reprocess a failed or completed job.
+ * Retry / reprocess a failed or completed job via POST /api/jobs/{id}/regenerate.
  */
 export async function reprocessJob(id: string): Promise<Job> {
   if (isMockMode()) {
     await new Promise((r) => setTimeout(r, 160));
     const idx = mockJobs.findIndex((j) => j.id === id);
-    if (idx === -1) throw new Error('Recording not found');
+    if (idx === -1) throw new ApiError('Recording not found', 404);
     const updated: Job = {
       ...mockJobs[idx],
       status: 'queued',
@@ -589,10 +993,12 @@ export async function reprocessJob(id: string): Promise<Job> {
     return structuredClone(updated);
   }
 
-  return apiFetch<Job>(`/api/jobs/${encodeURIComponent(id)}/regenerate`, {
+  const baseUrl = requireValidatedApiBaseUrl();
+  const raw = await apiFetch<unknown>(`/api/jobs/${encodeURIComponent(id)}/regenerate`, {
     method: 'POST',
     body: JSON.stringify({ section: 'summary' }),
   });
+  return normalizeJob(raw, baseUrl);
 }
 
 /**
@@ -605,7 +1011,7 @@ export async function regenerateSection(
   if (isMockMode()) {
     await new Promise((r) => setTimeout(r, 750));
     const idx = mockJobs.findIndex((j) => j.id === id);
-    if (idx === -1) throw new Error('Recording not found');
+    if (idx === -1) throw new ApiError('Recording not found', 404);
     const job = mockJobs[idx];
     const updated = structuredClone(job);
 
@@ -641,10 +1047,12 @@ export async function regenerateSection(
     return structuredClone(updated);
   }
 
-  return apiFetch<Job>(`/api/jobs/${encodeURIComponent(id)}/regenerate`, {
+  const baseUrl = requireValidatedApiBaseUrl();
+  const raw = await apiFetch<unknown>(`/api/jobs/${encodeURIComponent(id)}/regenerate`, {
     method: 'POST',
     body: JSON.stringify({ section }),
   });
+  return normalizeJob(raw, baseUrl);
 }
 
 /**
@@ -655,35 +1063,63 @@ export async function exportJob(
   format: ExportFormat,
   subtitleOptions?: SubtitleBuildOptions
 ): Promise<void> {
+  const settings = loadStoredSettings();
+  const isSubtitleFormat = format === 'srt' || format === 'vtt';
+  const effectiveIncludeSpeakers =
+    subtitleOptions?.includeSpeakers ?? settings.subtitleIncludeSpeakers;
+
   if (isMockMode()) {
     const job = mockJobs.find((j) => j.id === id);
-    if (!job) throw new Error('Recording not found');
-    const settings = loadStoredSettings();
+    if (!job) throw new ApiError('Recording not found', 404);
     downloadMockExport(job, format, {
-      includeSpeakers: settings.subtitleIncludeSpeakers,
-      ...(subtitleOptions ?? {}),
+      includeSpeakers: effectiveIncludeSpeakers,
+      offsetSec: subtitleOptions?.offsetSec ?? 0,
     });
     return;
   }
 
-  const baseUrl = getEffectiveApiBaseUrl();
+  const baseUrl = requireValidatedApiBaseUrl();
   const params = new URLSearchParams({ format });
-  if (subtitleOptions?.includeSpeakers !== undefined) {
-    params.set('speakers', String(subtitleOptions.includeSpeakers));
+  if (isSubtitleFormat) {
+    params.set('speakers', String(effectiveIncludeSpeakers));
+    if (subtitleOptions?.offsetSec !== undefined && subtitleOptions.offsetSec !== 0) {
+      params.set('offsetSec', String(subtitleOptions.offsetSec));
+    }
   }
-  if (subtitleOptions?.offsetSec) {
-    params.set('offsetSec', String(subtitleOptions.offsetSec));
-  }
+
   const url = `${baseUrl}/api/jobs/${encodeURIComponent(id)}/export?${params.toString()}`;
-  const res = await fetch(url);
+  let res: Response;
+  try {
+    res = await fetch(url);
+  } catch {
+    throw new ApiError(
+      `Cannot download export from ${baseUrl}. Check connectivity and CORS configuration.`,
+      0,
+      { isNetworkError: true }
+    );
+  }
+
   if (!res.ok) {
-    throw new Error(`Export failed (${res.status})`);
+    let bodyText = '';
+    try {
+      bodyText = await res.text();
+    } catch {
+      bodyText = '';
+    }
+    throw new ApiError(extractErrorMessage(res.status, bodyText), res.status);
   }
 
   const blob = await res.blob();
-  const disposition = res.headers.get('content-disposition');
-  const match = disposition?.match(/filename="?([^"]+)"?/i);
-  const filename = match?.[1] ?? `callscribe-${id}.${format}`;
+  if (blob.size === 0) {
+    throw new ApiError('Export returned an empty file.', res.status);
+  }
+
+  const safeFallbackId = id.replace(/[^a-zA-Z0-9_-]+/g, '-');
+  const fallbackName = `callscribe-${safeFallbackId}.${format}`;
+  const filename = parseContentDispositionFilename(
+    res.headers.get('content-disposition'),
+    fallbackName
+  );
 
   const objectUrl = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -708,5 +1144,6 @@ export async function deleteJob(id: string): Promise<void> {
 
   await apiFetch<void>(`/api/jobs/${encodeURIComponent(id)}`, {
     method: 'DELETE',
+    allowEmpty: true,
   });
 }

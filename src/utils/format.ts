@@ -143,3 +143,70 @@ export function getStatusLabel(status: JobStatus): string {
 export function stripFileExtension(filename: string): string {
   return filename.replace(/\.[^/.]+$/, '').replace(/[_-]+/g, ' ').trim();
 }
+
+export const ACCEPTED_MEDIA_EXTENSIONS = [
+  '.mp4',
+  '.mov',
+  '.mkv',
+  '.webm',
+  '.mp3',
+  '.m4a',
+  '.wav',
+] as const;
+
+export const ACCEPTED_MEDIA_MIME_TYPES = new Set([
+  'video/mp4',
+  'video/quicktime',
+  'video/x-matroska',
+  'video/webm',
+  'audio/mpeg',
+  'audio/mp3',
+  'audio/mp4',
+  'audio/x-m4a',
+  'audio/m4a',
+  'audio/wav',
+  'audio/x-wav',
+  'audio/wave',
+  'audio/webm',
+]);
+
+export const MAX_UPLOAD_FILE_BYTES = 2 * 1024 * 1024 * 1024; // 2 GB
+
+export interface FileValidationResult {
+  valid: File[];
+  rejected: { file: File; reason: string }[];
+}
+
+export function validateMediaFile(file: File): string | null {
+  const lowerName = file.name.toLowerCase();
+  const hasValidExt = ACCEPTED_MEDIA_EXTENSIONS.some((ext) => lowerName.endsWith(ext));
+  const hasValidMime = file.type ? ACCEPTED_MEDIA_MIME_TYPES.has(file.type.toLowerCase()) : false;
+
+  if (!hasValidExt && !hasValidMime) {
+    return `Unsupported file type "${file.name}". Allowed: MP4, MOV, MKV, WebM, MP3, M4A, WAV.`;
+  }
+  if (file.size <= 0) {
+    return `"${file.name}" is empty (0 B).`;
+  }
+  if (file.size > MAX_UPLOAD_FILE_BYTES) {
+    return `"${file.name}" exceeds the ${formatFileSize(MAX_UPLOAD_FILE_BYTES)} upload size limit.`;
+  }
+  return null;
+}
+
+export function validateMediaFiles(files: File[]): FileValidationResult {
+  const valid: File[] = [];
+  const rejected: { file: File; reason: string }[] = [];
+
+  for (const file of files) {
+    const err = validateMediaFile(file);
+    if (err) {
+      rejected.push({ file, reason: err });
+    } else {
+      valid.push(file);
+    }
+  }
+
+  return { valid, rejected };
+}
+

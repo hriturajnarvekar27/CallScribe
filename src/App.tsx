@@ -1,6 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AudioWaveform, Keyboard, Menu, Plus, Search } from 'lucide-react';
-import { createJob, listJobs, UploadController } from './api';
+import {
+  ApiError,
+  createJob,
+  getEffectiveApiBaseUrl,
+  isMockMode,
+  listJobs,
+  UploadController,
+} from './api';
 import { CommandPalette } from './components/CommandPalette';
 import { DashboardView } from './components/DashboardView';
 import { GlobalDropOverlay } from './components/GlobalDropOverlay';
@@ -68,7 +75,7 @@ function AppShell() {
   const [route, setRoute] = useState<AppRoute>(() => parseHashRoute());
   const [recentJobs, setRecentJobs] = useState<Job[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>(() =>
-    createInitialNotifications()
+    isMockMode() ? createInitialNotifications() : []
   );
 
   // Persisted Sidebar Collapse
@@ -144,13 +151,27 @@ function AppShell() {
       const data = await listJobs();
       handleJobsUpdated(data);
     } catch {
-      // Non-blocking for sidebar
+      if (!isMockMode()) {
+        setRecentJobs([]);
+      }
     }
   }, [handleJobsUpdated]);
 
+  const effectiveApiUrl = getEffectiveApiBaseUrl();
+  const prevApiUrlRef = useRef<string>(effectiveApiUrl);
+
   useEffect(() => {
+    if (prevApiUrlRef.current !== effectiveApiUrl) {
+      prevApiUrlRef.current = effectiveApiUrl;
+      previousJobStatusRef.current.clear();
+      setRecentJobs([]);
+      setNotifications(isMockMode() ? createInitialNotifications() : []);
+      controllersRef.current.forEach((ctrl) => ctrl.cancel());
+      controllersRef.current.clear();
+      setUploadTasks([]);
+    }
     void refreshRecentJobs();
-  }, [refreshRecentJobs]);
+  }, [effectiveApiUrl, refreshRecentJobs]);
 
   const navigate = useCallback((next: AppRoute) => {
     setRoute(next);
@@ -189,6 +210,8 @@ function AppShell() {
   // Upload Execution Engine
   const startUploadTask = useCallback(
     (task: UploadTask) => {
+      if (controllersRef.current.has(task.id)) return;
+
       const payload: UploadJobPayload = {
         file: task.file,
         title: task.title,
@@ -224,7 +247,8 @@ function AppShell() {
         .catch((err) => {
           controllersRef.current.delete(task.id);
           const msg = err instanceof Error ? err.message : 'Upload failed';
-          const cancelled = msg === 'Upload cancelled';
+          const cancelled =
+            (err instanceof ApiError && err.isAborted) || msg === 'Upload cancelled';
           setUploadTasks((prev) =>
             prev.map((t) =>
               t.id === task.id
@@ -249,7 +273,36 @@ function AppShell() {
       setUploadModalOpen(false);
       setPrefilledFiles([]);
 
-      const newTasks: UploadTask[] = payloads.map((p, i) => ({
+      const activeFingerprints = new Set(
+        tasksRef.current
+          .filter((t) => t.status === 'uploading' || t.status === 'paused')
+          .map((t) => `${t.file.name}::${t.file.size}::${t.file.lastModified}`)
+      );
+
+      const uniquePayloads: UploadJobPayload[] = [];
+      let skippedDuplicates = 0;
+
+      for (const p of payloads) {
+        const fp = `${p.file.name}::${p.file.size}::${p.file.lastModified}`;
+        if (activeFingerprints.has(fp)) {
+          skippedDuplicates += 1;
+          continue;
+        }
+        activeFingerprints.add(fp);
+        uniquePayloads.push(p);
+      }
+
+      if (skippedDuplicates > 0) {
+        showToast(
+          `Skipped ${skippedDuplicates} duplicate ${skippedDuplicates === 1 ? 'upload already in progress' : 'uploads already in progress'}.`,
+          'info'
+        );
+      }
+
+      if (uniquePayloads.length === 0) return;
+
+      const supportsPause = isMockMode();
+      const newTasks: UploadTask[] = uniquePayloads.map((p, i) => ({
         id: `upl-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
         file: p.file,
         title: p.title,
@@ -259,6 +312,7 @@ function AppShell() {
         context: p.context,
         progress: 0,
         status: 'uploading',
+        supportsPause,
       }));
 
       setUploadTasks((prev) => [...newTasks, ...prev]);
@@ -266,17 +320,30 @@ function AppShell() {
         startUploadTask(task);
       }
     },
-    [startUploadTask]
+    [startUploadTask, showToast]
   );
 
-  const handlePauseUpload = useCallback((id: string) => {
-    controllersRef.current.get(id)?.pause();
-    setUploadTasks((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, status: 'paused' } : t))
-    );
-  }, []);
+  const handlePauseUpload = useCallback(
+    (id: string) => {
+      const target = tasksRef.current.find((t) => t.id === id);
+      if (target?.supportsPause === false) {
+        showToast(
+          'Live HTTP uploads cannot be paused mid-transfer. Use Cancel and Retry instead.',
+          'info'
+        );
+        return;
+      }
+      controllersRef.current.get(id)?.pause();
+      setUploadTasks((prev) =>
+        prev.map((t) => (t.id === id ? { ...t, status: 'paused' } : t))
+      );
+    },
+    [showToast]
+  );
 
   const handleResumeUpload = useCallback((id: string) => {
+    const target = tasksRef.current.find((t) => t.id === id);
+    if (target?.supportsPause === false) return;
     controllersRef.current.get(id)?.resume();
     setUploadTasks((prev) =>
       prev.map((t) => (t.id === id ? { ...t, status: 'uploading' } : t))

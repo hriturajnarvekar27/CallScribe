@@ -13,7 +13,7 @@ import {
   Subtitles,
   UploadCloud,
 } from 'lucide-react';
-import { exportJob, listJobs, reprocessJob } from '../api';
+import { ApiError, exportJob, listJobs, reprocessJob } from '../api';
 import { Job } from '../types';
 import {
   formatDuration,
@@ -44,17 +44,54 @@ export function DashboardView({
 
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [dropActive, setDropActive] = useState(false);
+
+  const mountedRef = useRef(true);
+  const inFlightRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const jobsRef = useRef<Job[]>(jobs);
+  jobsRef.current = jobs;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      abortControllerRef.current?.abort();
+    };
+  }, []);
 
   const fetchJobs = useCallback(
     async (isInitial = false) => {
-      if (isInitial) setLoading(true);
+      if (!isInitial && inFlightRef.current) return;
+      if (isInitial) {
+        abortControllerRef.current?.abort();
+        setLoading(true);
+        setError(null);
+      }
+
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+      inFlightRef.current = true;
+
       try {
-        const data = await listJobs();
+        const data = await listJobs(controller.signal);
+        if (!mountedRef.current) return;
         setJobs(data);
         onJobsUpdated?.(data);
+        setError(null);
+      } catch (err) {
+        if (!mountedRef.current) return;
+        if (err instanceof ApiError && err.isAborted) return;
+        const msg = err instanceof Error ? err.message : 'Unable to reach backend API';
+        if (isInitial || jobsRef.current.length === 0) {
+          setError(msg);
+        }
       } finally {
-        if (isInitial) setLoading(false);
+        inFlightRef.current = false;
+        if (mountedRef.current && isInitial) {
+          setLoading(false);
+        }
       }
     },
     [onJobsUpdated]
@@ -62,6 +99,10 @@ export function DashboardView({
 
   useEffect(() => {
     void fetchJobs(true);
+    return () => {
+      abortControllerRef.current?.abort();
+      inFlightRef.current = false;
+    };
   }, [fetchJobs]);
 
   const hasActiveJobs = useMemo(
@@ -194,7 +235,9 @@ export function DashboardView({
   const handleRetry = async (job: Job) => {
     try {
       const updated = await reprocessJob(job.id);
-      setJobs((prev) => prev.map((j) => (j.id === job.id ? updated : j)));
+      const nextJobs = jobsRef.current.map((j) => (j.id === job.id ? updated : j));
+      setJobs(nextJobs);
+      onJobsUpdated?.(nextJobs);
       showToast(`Retrying "${job.title}"...`, 'info');
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Retry failed', 'error');
@@ -290,6 +333,27 @@ export function DashboardView({
           Choose files
         </button>
       </div>
+
+      {/* Backend API Error Banner */}
+      {!loading && error && (
+        <div
+          role="alert"
+          className="cs-surface mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50/80 px-4 py-3 text-xs text-rose-900 dark:border-rose-900/60 dark:bg-rose-950/35 dark:text-rose-200"
+        >
+          <div className="flex items-center gap-2.5">
+            <AlertCircle className="h-4 w-4 shrink-0 text-rose-600 dark:text-rose-400" aria-hidden="true" />
+            <span>{error}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => void fetchJobs(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300 bg-white px-3 py-1 text-xs font-semibold text-rose-800 hover:bg-rose-100 dark:border-rose-800 dark:bg-rose-950/60 dark:text-rose-100"
+          >
+            <RotateCw className="h-3 w-3" aria-hidden="true" />
+            <span>Retry</span>
+          </button>
+        </div>
+      )}
 
       {/* 5-Card Stats Strip */}
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">

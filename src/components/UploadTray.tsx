@@ -114,8 +114,23 @@ export function UploadTray({
                     <button
                       type="button"
                       onClick={() => onPause(task.id)}
-                      aria-label="Pause upload"
-                      className="rounded p-1 text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                      disabled={task.supportsPause === false}
+                      aria-disabled={task.supportsPause === false}
+                      title={
+                        task.supportsPause === false
+                          ? 'Live HTTP uploads cannot be paused mid-transfer — use Cancel and Retry'
+                          : 'Pause upload'
+                      }
+                      aria-label={
+                        task.supportsPause === false
+                          ? 'Pause unavailable for live HTTP upload'
+                          : 'Pause upload'
+                      }
+                      className={`rounded p-1 transition-colors ${
+                        task.supportsPause === false
+                          ? 'cursor-not-allowed text-zinc-300 dark:text-zinc-600'
+                          : 'text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800'
+                      }`}
                     >
                       <Pause className="h-3.5 w-3.5" aria-hidden="true" />
                     </button>

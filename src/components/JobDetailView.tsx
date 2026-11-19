@@ -56,7 +56,7 @@ export function JobDetailView({
   onJobChanged,
 }: JobDetailViewProps) {
   const { showToast } = useToast();
-  const { job, setJob, loading, error, refetch } = useJobPolling(jobId);
+  const { job, setJob, loading, error, pollWarning, refetch } = useJobPolling(jobId);
 
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
@@ -74,6 +74,7 @@ export function JobDetailView({
 
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const appliedSeekKeyRef = useRef<string | null>(null);
+  const prevTrackedJobRef = useRef<{ id: string; status: string } | null>(null);
 
   useEffect(() => {
     setCurrentTime(initialSeekSec ?? 0);
@@ -82,7 +83,25 @@ export function JobDetailView({
     setRenamingSpeakerId(null);
     setConfirmDelete(false);
     appliedSeekKeyRef.current = null;
+    prevTrackedJobRef.current = null;
   }, [jobId, initialSeekSec]);
+
+  useEffect(() => {
+    if (!job) return;
+    const prev = prevTrackedJobRef.current;
+    if (
+      prev &&
+      prev.id === job.id &&
+      (prev.status === 'queued' ||
+        prev.status === 'extracting_audio' ||
+        prev.status === 'transcribing' ||
+        prev.status === 'analyzing') &&
+      (job.status === 'done' || job.status === 'failed')
+    ) {
+      onJobChanged?.();
+    }
+    prevTrackedJobRef.current = { id: job.id, status: job.status };
+  }, [job, onJobChanged]);
 
   useEffect(() => {
     if (
@@ -179,6 +198,7 @@ export function JobDetailView({
     try {
       const saved = await patchJob(job.id, { speakers: updatedSpeakers });
       setJob(saved);
+      onJobChanged?.();
       showToast(`Speaker renamed to "${trimmed}".`, 'success');
     } catch (err) {
       setJob(previous);
@@ -529,6 +549,24 @@ export function JobDetailView({
           )}
         </div>
       </div>
+
+      {/* Transient Polling Warning Banner */}
+      {pollWarning && (
+        <div
+          role="status"
+          className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-2.5 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/35 dark:text-amber-200"
+        >
+          <span>{pollWarning}</span>
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/60 dark:text-amber-100"
+          >
+            <RefreshCw className="h-3 w-3" aria-hidden="true" />
+            <span>Retry now</span>
+          </button>
+        </div>
+      )}
 
       {/* Processing / Failed State */}
       {(processing || job.status === 'failed') && (

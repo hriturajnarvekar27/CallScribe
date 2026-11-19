@@ -1,7 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { FileAudio, FileVideo, Trash2, UploadCloud, X } from 'lucide-react';
 import { AppSettings, OutputSelections, UploadJobPayload } from '../types';
-import { formatFileSize, stripFileExtension } from '../utils/format';
+import {
+  ACCEPTED_MEDIA_EXTENSIONS,
+  formatFileSize,
+  stripFileExtension,
+  validateMediaFiles,
+} from '../utils/format';
 
 interface NewTranscriptionModalProps {
   open: boolean;
@@ -11,7 +16,11 @@ interface NewTranscriptionModalProps {
   onEnqueueUploads: (payloads: UploadJobPayload[]) => void;
 }
 
-const ACCEPTED_EXTENSIONS = '.mp4,.mov,.mkv,.webm,.mp3,.m4a,.wav';
+const ACCEPTED_EXTENSIONS = ACCEPTED_MEDIA_EXTENSIONS.join(',');
+
+function fileFingerprint(file: File): string {
+  return `${file.name}::${file.size}::${file.lastModified}`;
+}
 
 export function NewTranscriptionModal({
   open,
@@ -21,6 +30,7 @@ export function NewTranscriptionModal({
   onEnqueueUploads,
 }: NewTranscriptionModalProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const submittingRef = useRef(false);
 
   const [files, setFiles] = useState<File[]>([]);
   const [dragActive, setDragActive] = useState(false);
@@ -32,14 +42,34 @@ export function NewTranscriptionModal({
   const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!open) return;
-    setFiles(prefilledFiles);
-    setTitle(prefilledFiles.length === 1 ? stripFileExtension(prefilledFiles[0].name) : '');
+    if (!open) {
+      submittingRef.current = false;
+      return;
+    }
+    submittingRef.current = false;
+
+    const { valid, rejected } = validateMediaFiles(prefilledFiles);
+    const seen = new Set<string>();
+    const deduped = valid.filter((f) => {
+      const fp = fileFingerprint(f);
+      if (seen.has(fp)) return false;
+      seen.add(fp);
+      return true;
+    });
+
+    setFiles(deduped);
+    setTitle(deduped.length === 1 ? stripFileExtension(deduped[0].name) : '');
     setLanguage(settings.defaultLanguage);
     setSpeakers('auto');
     setOutputs({ ...settings.defaultOutputs });
     setContext('');
-    setFormError(null);
+    setFormError(
+      rejected.length > 0
+        ? rejected.length === 1
+          ? rejected[0].reason
+          : `${rejected[0].reason} (+${rejected.length - 1} more rejected)`
+        : null
+    );
   }, [open, prefilledFiles, settings]);
 
   useEffect(() => {
@@ -58,14 +88,35 @@ export function NewTranscriptionModal({
   const addFiles = (incoming: FileList | File[]) => {
     const arr = Array.from(incoming);
     if (arr.length === 0) return;
+
+    const { valid, rejected } = validateMediaFiles(arr);
+
     setFiles((prev) => {
-      const merged = [...prev, ...arr];
+      const existing = new Set(prev.map(fileFingerprint));
+      const uniqueNew: File[] = [];
+      for (const f of valid) {
+        const fp = fileFingerprint(f);
+        if (!existing.has(fp)) {
+          existing.add(fp);
+          uniqueNew.push(f);
+        }
+      }
+      const merged = [...prev, ...uniqueNew];
       if (merged.length === 1 && !title.trim()) {
         setTitle(stripFileExtension(merged[0].name));
       }
       return merged;
     });
-    setFormError(null);
+
+    if (rejected.length > 0) {
+      setFormError(
+        rejected.length === 1
+          ? rejected[0].reason
+          : `${rejected[0].reason} (+${rejected.length - 1} more rejected)`
+      );
+    } else {
+      setFormError(null);
+    }
   };
 
   const removeFileAt = (idx: number) => {
@@ -87,15 +138,24 @@ export function NewTranscriptionModal({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (submittingRef.current) return;
+
     if (files.length === 0) {
       setFormError('Please choose at least one audio or video recording to upload.');
       return;
     }
 
-    const payloads: UploadJobPayload[] = files.map((f, idx) => ({
+    const { valid, rejected } = validateMediaFiles(files);
+    if (rejected.length > 0 || valid.length === 0) {
+      setFormError(rejected[0]?.reason ?? 'Please select valid media files.');
+      return;
+    }
+
+    submittingRef.current = true;
+    const payloads: UploadJobPayload[] = valid.map((f, idx) => ({
       file: f,
       title:
-        files.length === 1
+        valid.length === 1
           ? title.trim() || stripFileExtension(f.name)
           : title.trim()
             ? `${title.trim()} (${idx + 1})`
@@ -155,6 +215,7 @@ export function NewTranscriptionModal({
               accept={ACCEPTED_EXTENSIONS}
               onChange={(e) => {
                 if (e.target.files) addFiles(e.target.files);
+                e.target.value = '';
               }}
               className="sr-only"
               id="callscribe-file-upload"

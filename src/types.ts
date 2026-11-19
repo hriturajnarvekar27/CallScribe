@@ -133,6 +133,7 @@ export interface UploadTask {
   context: string;
   progress: number;
   status: 'uploading' | 'paused' | 'completed' | 'error' | 'cancelled';
+  supportsPause?: boolean;
   error?: string;
   jobId?: string;
 }

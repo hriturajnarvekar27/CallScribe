@@ -1,6 +1,12 @@
-import React, { useState } from 'react';
-import { Check, RotateCcw, Server, Sparkles } from 'lucide-react';
-import { getEnvApiBaseUrl, isMockMode } from '../api';
+import React, { useEffect, useState } from 'react';
+import { Check, Loader2, RotateCcw, Server, Sparkles } from 'lucide-react';
+import {
+  getEffectiveApiBaseUrl,
+  getEnvApiBaseUrl,
+  isMockMode,
+  listJobs,
+  validateApiBaseUrl,
+} from '../api';
 import { LIVE_BACKGROUND_OPTIONS, THEME_OPTIONS } from '../hooks/useSettings';
 import { AppSettings, OutputSelections } from '../types';
 import { useToast } from './ToastProvider';
@@ -13,8 +19,21 @@ interface SettingsViewProps {
 export function SettingsView({ settings, onUpdateSettings }: SettingsViewProps) {
   const { showToast } = useToast();
   const [apiInput, setApiInput] = useState(settings.apiBaseUrl);
+  const [apiError, setApiError] = useState<string | null>(null);
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [connectionResult, setConnectionResult] = useState<{
+    ok: boolean;
+    message: string;
+  } | null>(null);
+
   const envDefault = getEnvApiBaseUrl();
+  const effectiveUrl = getEffectiveApiBaseUrl();
   const mockActive = isMockMode();
+  const effectiveValidation = validateApiBaseUrl(effectiveUrl);
+
+  useEffect(() => {
+    setApiInput(settings.apiBaseUrl);
+  }, [settings.apiBaseUrl]);
 
   const toggleDefaultOutput = (key: keyof OutputSelections) => {
     onUpdateSettings((prev) => ({
@@ -29,19 +48,33 @@ export function SettingsView({ settings, onUpdateSettings }: SettingsViewProps) 
 
   const handleSaveApiUrl = (e: React.FormEvent) => {
     e.preventDefault();
-    const cleaned = apiInput.trim().replace(/\/+$/, '');
-    setApiInput(cleaned);
-    onUpdateSettings({ apiBaseUrl: cleaned });
+    const validation = validateApiBaseUrl(apiInput);
+    if (!validation.valid) {
+      const message = validation.error ?? 'Invalid API base URL.';
+      setApiError(message);
+      setConnectionResult(null);
+      showToast(message, 'error');
+      return;
+    }
+
+    setApiError(null);
+    setConnectionResult(null);
+    setApiInput(validation.normalized);
+    onUpdateSettings({ apiBaseUrl: validation.normalized });
     showToast(
-      cleaned
-        ? `API base URL updated to ${cleaned}`
-        : 'API base URL cleared. Mock mode active.',
+      validation.normalized
+        ? `API base URL updated to ${validation.normalized}`
+        : envDefault
+          ? `Override cleared. Using VITE_API_BASE_URL (${envDefault}).`
+          : 'API base URL cleared. Mock mode active.',
       'success'
     );
   };
 
   const handleResetApiUrl = () => {
     setApiInput('');
+    setApiError(null);
+    setConnectionResult(null);
     onUpdateSettings({ apiBaseUrl: '' });
     showToast(
       envDefault
@@ -49,6 +82,32 @@ export function SettingsView({ settings, onUpdateSettings }: SettingsViewProps) 
         : 'Reverted to built-in Mock Mode.',
       'info'
     );
+  };
+
+  const handleTestConnection = async () => {
+    if (isMockMode()) {
+      setConnectionResult({
+        ok: true,
+        message: 'Mock Mode is active locally. Enter a backend URL above to test a live server.',
+      });
+      return;
+    }
+    setTestingConnection(true);
+    setConnectionResult(null);
+    try {
+      const jobs = await listJobs();
+      setConnectionResult({
+        ok: true,
+        message: `Connected to ${effectiveUrl} (${jobs.length} recordings returned).`,
+      });
+    } catch (err) {
+      setConnectionResult({
+        ok: false,
+        message: err instanceof Error ? err.message : 'Unable to reach backend API.',
+      });
+    } finally {
+      setTestingConnection(false);
+    }
   };
 
   return (
@@ -282,13 +341,31 @@ export function SettingsView({ settings, onUpdateSettings }: SettingsViewProps) 
                 or built-in Mock Mode.
               </p>
             </div>
-            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-300">
+            <span
+              className={`inline-flex items-center gap-1.5 text-xs font-medium ${
+                !effectiveValidation.valid
+                  ? 'text-rose-600 dark:text-rose-400'
+                  : 'text-zinc-600 dark:text-zinc-300'
+              }`}
+            >
               <Server className="cs-accent-text h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" aria-hidden="true" />
-              <span>{mockActive ? 'Mock Mode active' : 'Live API active'}</span>
+              <span>
+                {mockActive
+                  ? 'Mock Mode active'
+                  : effectiveValidation.valid
+                    ? 'Live API active'
+                    : 'Invalid API configuration'}
+              </span>
             </span>
           </div>
 
-          <form onSubmit={handleSaveApiUrl} className="mt-4 space-y-3">
+          {!effectiveValidation.valid && effectiveValidation.error && (
+            <p role="alert" className="mt-3 text-xs font-medium text-rose-600 dark:text-rose-400">
+              {effectiveValidation.error}
+            </p>
+          )}
+
+          <form onSubmit={handleSaveApiUrl} noValidate className="mt-4 space-y-3">
             <div>
               <label
                 htmlFor="settings-api-url"
@@ -300,10 +377,18 @@ export function SettingsView({ settings, onUpdateSettings }: SettingsViewProps) 
                 id="settings-api-url"
                 type="url"
                 value={apiInput}
-                onChange={(e) => setApiInput(e.target.value)}
+                onChange={(e) => {
+                  setApiInput(e.target.value);
+                  if (apiError) setApiError(null);
+                }}
                 placeholder={envDefault || 'https://api.yourdomain.com'}
                 className="w-full rounded-xl border border-zinc-200 bg-white px-3.5 py-2 font-mono text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:placeholder:text-zinc-500"
               />
+              {apiError && (
+                <p role="alert" className="mt-1.5 text-xs font-medium text-rose-600 dark:text-rose-400">
+                  {apiError}
+                </p>
+              )}
             </div>
 
             <div className="flex flex-wrap items-center gap-2.5">
@@ -315,6 +400,17 @@ export function SettingsView({ settings, onUpdateSettings }: SettingsViewProps) 
               </button>
               <button
                 type="button"
+                onClick={() => void handleTestConnection()}
+                disabled={testingConnection}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-3.5 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              >
+                {testingConnection && (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                )}
+                <span>{testingConnection ? 'Testing...' : 'Test connection'}</span>
+              </button>
+              <button
+                type="button"
                 onClick={handleResetApiUrl}
                 className="inline-flex items-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-3.5 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
               >
@@ -322,6 +418,19 @@ export function SettingsView({ settings, onUpdateSettings }: SettingsViewProps) 
                 <span>Reset override</span>
               </button>
             </div>
+
+            {connectionResult && (
+              <p
+                role="status"
+                className={`text-xs font-medium ${
+                  connectionResult.ok
+                    ? 'text-emerald-600 dark:text-emerald-400'
+                    : 'text-rose-600 dark:text-rose-400'
+                }`}
+              >
+                {connectionResult.message}
+              </p>
+            )}
           </form>
         </section>
       </div>

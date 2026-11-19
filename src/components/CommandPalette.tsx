@@ -12,7 +12,7 @@ import {
   Settings,
   Sparkles,
 } from 'lucide-react';
-import { listFullJobsForWorkspace } from '../api';
+import { ApiError, listFullJobsForWorkspace } from '../api';
 import { AppRoute, Job } from '../types';
 import { formatTimestamp } from '../utils/format';
 
@@ -67,14 +67,27 @@ export function CommandPalette({
   const inputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState('');
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
 
   useEffect(() => {
     if (!open) return;
     setQuery('');
     setActiveIndex(0);
-    void listFullJobsForWorkspace().then(setJobs).catch(() => {});
-    window.setTimeout(() => inputRef.current?.focus(), 20);
+    setLoadError(null);
+    const controller = new AbortController();
+    void listFullJobsForWorkspace(controller.signal)
+      .then(setJobs)
+      .catch((err) => {
+        if (err instanceof ApiError && err.isAborted) return;
+        setJobs([]);
+        setLoadError(err instanceof Error ? err.message : 'Unable to load recordings');
+      });
+    const focusTimer = window.setTimeout(() => inputRef.current?.focus(), 20);
+    return () => {
+      controller.abort();
+      window.clearTimeout(focusTimer);
+    };
   }, [open]);
 
   const results = useMemo<PaletteResult[]>(() => {
@@ -284,6 +297,14 @@ export function CommandPalette({
 
         {/* Results */}
         <div className="max-h-[60vh] overflow-y-auto p-2 cs-scrollbar">
+          {loadError && (
+            <p
+              role="status"
+              className="mx-2 mb-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/35 dark:text-rose-300"
+            >
+              {loadError}
+            </p>
+          )}
           {results.length === 0 ? (
             <p className="px-4 py-10 text-center text-xs text-zinc-500 dark:text-zinc-400">
               No matching calls, transcripts, clients, or commands found.

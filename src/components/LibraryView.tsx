@@ -25,6 +25,7 @@ import {
   X,
 } from 'lucide-react';
 import {
+  ApiError,
   deleteJob,
   exportJob,
   listJobs,
@@ -119,21 +120,50 @@ export function LibraryView({
     }
   };
 
+  const mountedRef = useRef(true);
+  const inFlightRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const jobsRef = useRef<Job[]>(jobs);
+  jobsRef.current = jobs;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      abortControllerRef.current?.abort();
+    };
+  }, []);
+
   const fetchJobs = useCallback(
     async (isInitial = false) => {
+      if (!isInitial && inFlightRef.current) return;
+
       if (isInitial) {
+        abortControllerRef.current?.abort();
         setLoading(true);
         setError(null);
       }
+
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+      inFlightRef.current = true;
+
       try {
-        const data = await listJobs();
+        const data = await listJobs(controller.signal);
+        if (!mountedRef.current) return;
         setJobs(data);
         onJobsUpdated?.(data);
         setError(null);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Unable to load recordings');
+        if (!mountedRef.current) return;
+        if (err instanceof ApiError && err.isAborted) return;
+        const message = err instanceof Error ? err.message : 'Unable to load recordings';
+        if (isInitial || jobsRef.current.length === 0) {
+          setError(message);
+        }
       } finally {
-        if (isInitial) {
+        inFlightRef.current = false;
+        if (mountedRef.current && isInitial) {
           setLoading(false);
         }
       }
@@ -143,6 +173,10 @@ export function LibraryView({
 
   useEffect(() => {
     void fetchJobs(true);
+    return () => {
+      abortControllerRef.current?.abort();
+      inFlightRef.current = false;
+    };
   }, [fetchJobs]);
 
   const hasActiveJobs = useMemo(
@@ -398,11 +432,13 @@ export function LibraryView({
 
   const handleTogglePin = async (job: Job) => {
     const nextPinned = !job.pinned;
-    setJobs((prev) =>
-      prev.map((j) => (j.id === job.id ? { ...j, pinned: nextPinned } : j))
+    const nextJobs = jobsRef.current.map((j) =>
+      j.id === job.id ? { ...j, pinned: nextPinned } : j
     );
+    setJobs(nextJobs);
     try {
       await patchJob(job.id, { pinned: nextPinned });
+      onJobsUpdated?.(nextJobs);
       showToast(nextPinned ? 'Call pinned to top.' : 'Call unpinned.', 'success');
     } catch {
       void fetchJobs(false);
@@ -413,12 +449,13 @@ export function LibraryView({
     const trimmed = renameDraft.trim();
     setRenamingId(null);
     if (!trimmed || trimmed === job.title) return;
-    setJobs((prev) =>
-      prev.map((j) => (j.id === job.id ? { ...j, title: trimmed } : j))
+    const nextJobs = jobsRef.current.map((j) =>
+      j.id === job.id ? { ...j, title: trimmed } : j
     );
+    setJobs(nextJobs);
     try {
       await patchJob(job.id, { title: trimmed });
-      onJobsUpdated?.(jobs);
+      onJobsUpdated?.(nextJobs);
       showToast('Call renamed.', 'success');
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Rename failed', 'error');
@@ -426,10 +463,21 @@ export function LibraryView({
     }
   };
 
+  const handleExportSingle = async (job: Job, format: 'srt' | 'md') => {
+    try {
+      await exportJob(job.id, format);
+      showToast(`Exported ${format.toUpperCase()} for "${job.title}".`, 'success');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Export failed', 'error');
+    }
+  };
+
   const handleRetryOrReprocess = async (job: Job) => {
     try {
       const updated = await reprocessJob(job.id);
-      setJobs((prev) => prev.map((j) => (j.id === job.id ? updated : j)));
+      const nextJobs = jobsRef.current.map((j) => (j.id === job.id ? updated : j));
+      setJobs(nextJobs);
+      onJobsUpdated?.(nextJobs);
       showToast(`Reprocessing "${job.title}"...`, 'info');
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Failed to reprocess', 'error');
@@ -437,7 +485,8 @@ export function LibraryView({
   };
 
   const handleDeleteSingle = async (job: Job) => {
-    setJobs((prev) => prev.filter((j) => j.id !== job.id));
+    const nextJobs = jobsRef.current.filter((j) => j.id !== job.id);
+    setJobs(nextJobs);
     setSelectedIds((prev) => {
       const next = new Set(prev);
       next.delete(job.id);
@@ -445,6 +494,7 @@ export function LibraryView({
     });
     try {
       await deleteJob(job.id);
+      onJobsUpdated?.(nextJobs);
       showToast('Recording deleted.', 'success');
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Delete failed', 'error');
@@ -455,30 +505,50 @@ export function LibraryView({
   // Bulk Actions
   const handleBulkExport = async () => {
     const selectedJobs = jobs.filter((j) => selectedIds.has(j.id) && j.status === 'done');
-    for (const j of selectedJobs) {
-      await exportJob(j.id, 'md');
+    if (selectedJobs.length === 0) {
+      showToast('No completed recordings selected for export.', 'info');
+      return;
     }
-    showToast(`Exported ${selectedJobs.length} Markdown files.`, 'success');
+    try {
+      for (const j of selectedJobs) {
+        await exportJob(j.id, 'md');
+      }
+      showToast(`Exported ${selectedJobs.length} Markdown files.`, 'success');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Bulk export failed', 'error');
+    }
   };
 
   const handleBulkReprocess = async () => {
     const ids = Array.from(selectedIds);
-    for (const id of ids) {
-      await reprocessJob(id);
+    try {
+      for (const id of ids) {
+        await reprocessJob(id);
+      }
+      setSelectedIds(new Set());
+      void fetchJobs(false);
+      showToast(`Reprocessing ${ids.length} recordings.`, 'info');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Bulk reprocess failed', 'error');
+      void fetchJobs(false);
     }
-    setSelectedIds(new Set());
-    void fetchJobs(false);
-    showToast(`Reprocessing ${ids.length} recordings.`, 'info');
   };
 
   const handleBulkDelete = async () => {
     const ids = Array.from(selectedIds);
-    setJobs((prev) => prev.filter((j) => !selectedIds.has(j.id)));
+    const nextJobs = jobsRef.current.filter((j) => !selectedIds.has(j.id));
+    setJobs(nextJobs);
     setSelectedIds(new Set());
-    for (const id of ids) {
-      await deleteJob(id);
+    try {
+      for (const id of ids) {
+        await deleteJob(id);
+      }
+      onJobsUpdated?.(nextJobs);
+      showToast(`Deleted ${ids.length} recordings.`, 'success');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Bulk delete failed', 'error');
+      void fetchJobs(false);
     }
-    showToast(`Deleted ${ids.length} recordings.`, 'success');
   };
 
   const handleApplyBulkInput = async (e: React.FormEvent) => {
@@ -488,20 +558,25 @@ export function LibraryView({
 
     const ids = Array.from(selectedIds);
     if (bulkActionInput === 'tag') {
-      setJobs((prev) =>
-        prev.map((j) =>
-          selectedIds.has(j.id)
-            ? { ...j, tags: Array.from(new Set([...(j.tags ?? []), val])) }
-            : j
-        )
+      const nextJobs = jobsRef.current.map((j) =>
+        selectedIds.has(j.id)
+          ? { ...j, tags: Array.from(new Set([...(j.tags ?? []), val])) }
+          : j
       );
-      for (const id of ids) {
-        const target = jobs.find((j) => j.id === id);
-        await patchJob(id, {
-          tags: Array.from(new Set([...(target?.tags ?? []), val])),
-        });
+      setJobs(nextJobs);
+      try {
+        for (const id of ids) {
+          const target = jobsRef.current.find((j) => j.id === id);
+          await patchJob(id, {
+            tags: Array.from(new Set([...(target?.tags ?? []), val])),
+          });
+        }
+        onJobsUpdated?.(nextJobs);
+        showToast(`Added tag #${val} to ${ids.length} recordings.`, 'success');
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : 'Failed to apply tag', 'error');
+        void fetchJobs(false);
       }
-      showToast(`Added tag #${val} to ${ids.length} recordings.`, 'success');
     }
 
     setBulkActionInput(null);
@@ -704,7 +779,7 @@ export function LibraryView({
               <>
                 <button
                   type="button"
-                  onClick={() => void exportJob(job.id, 'srt')}
+                  onClick={() => void handleExportSingle(job, 'srt')}
                   title="Download SRT subtitles"
                   aria-label="Download SRT subtitles"
                   className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-200/70 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-white"
@@ -713,7 +788,7 @@ export function LibraryView({
                 </button>
                 <button
                   type="button"
-                  onClick={() => void exportJob(job.id, 'md')}
+                  onClick={() => void handleExportSingle(job, 'md')}
                   title="Export Markdown"
                   aria-label="Export Markdown"
                   className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-200/70 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-white"
@@ -1447,7 +1522,7 @@ export function LibraryView({
           setRenameDraft(job.title);
         }}
         onTogglePin={(job) => void handleTogglePin(job)}
-        onExportMd={(job) => void exportJob(job.id, 'md')}
+        onExportMd={(job) => void handleExportSingle(job, 'md')}
         onReprocess={(job) => void handleRetryOrReprocess(job)}
         onDelete={(job) => void handleDeleteSingle(job)}
       />
