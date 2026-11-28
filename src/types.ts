@@ -2,11 +2,16 @@ export type JobStatus =
   | 'queued'
   | 'extracting_audio'
   | 'transcribing'
+  | 'diarizing'
+  | 'aligning'
   | 'analyzing'
   | 'done'
-  | 'failed';
+  | 'failed'
+  | 'cancelled';
 
 export type ExportFormat = 'docx' | 'pdf' | 'md' | 'txt' | 'srt' | 'vtt';
+
+export type AudioFormat = 'mp3' | 'wav';
 
 export type RegenerateSection = 'summary' | 'notes' | 'analysis';
 
@@ -14,12 +19,29 @@ export type SentimentType = 'positive' | 'neutral' | 'negative';
 
 export type SubtitleFormat = 'srt' | 'vtt';
 
+export type TranscriptViewMode = 'transcript' | 'timestamped';
+
+export interface ExportOptions {
+  includeTimestamps?: boolean;
+  includeSpeakers?: boolean;
+  offsetSec?: number;
+}
+
+export type BookmarkCategory = 'important' | 'question' | 'decision' | 'follow-up' | 'note';
+
 export type ThemeMode =
   | 'dark'
   | 'light'
+  | 'light-warm'
+  | 'light-ocean'
+  | 'midnight-indigo'
+  | 'forest-moss'
+  | 'obsidian-rose'
   | 'amoled-cyan'
   | 'amoled-violet'
   | 'amoled-emerald'
+  | 'amoled-amber'
+  | 'amoled-crimson'
   | 'system';
 
 export type LiveBackgroundMode =
@@ -27,7 +49,49 @@ export type LiveBackgroundMode =
   | 'waves'
   | 'particles'
   | 'grid'
+  | 'starfield'
+  | 'rain'
+  | 'fireflies'
+  | 'topography'
+  | 'pokemon'
+  | 'animals'
+  | 'aquarium'
+  | 'custom'
   | 'off';
+
+export type CustomBackgroundBaseStyle = 'gradient' | 'radial' | 'solid' | 'image';
+export type CustomBackgroundPattern = 'none' | 'dots' | 'grid' | 'diagonal' | 'rings';
+export type CustomBackgroundMotion =
+  | 'none'
+  | 'aurora'
+  | 'particles'
+  | 'waves'
+  | 'fireflies'
+  | 'starfield';
+
+export interface CustomBackgroundConfig {
+  baseStyle: CustomBackgroundBaseStyle;
+  primaryColor: string;
+  secondaryColor: string;
+  tertiaryColor: string;
+  angleDeg: number;
+  pattern: CustomBackgroundPattern;
+  motion: CustomBackgroundMotion;
+  imageDataUrl: string;
+  imageBlurPx: number;
+  imageDimPercent: number;
+}
+
+export interface UserProfile {
+  displayName: string;
+  email: string;
+  role: string;
+  organization: string;
+  bio: string;
+  timezone: string;
+  avatarUrl: string;
+  avatarColor: string;
+}
 
 export type SortOption = 'newest' | 'longest' | 'title';
 
@@ -49,11 +113,31 @@ export interface TranscriptSegment {
   end: number;
   speakerId: string;
   text: string;
+  confidence?: number;
+  uncertain?: boolean;
 }
 
 export interface NoteSection {
   heading: string;
   bullets: string[];
+}
+
+export interface Bookmark {
+  id: string;
+  timeSec: number;
+  category: BookmarkCategory;
+  label: string;
+  note?: string;
+  createdAt?: string;
+}
+
+export interface ActionItem {
+  id: string;
+  task: string;
+  owner?: string;
+  deadline?: string;
+  timestampSec?: number;
+  completed: boolean;
 }
 
 export interface JobAnalysis {
@@ -64,6 +148,7 @@ export interface JobAnalysis {
   concerns: string[];
   risks: string[];
   nextSteps: string[];
+  questionsRaised?: string[];
 }
 
 export interface Job {
@@ -74,6 +159,7 @@ export interface Job {
   language: string;
   status: JobStatus;
   progress: number;
+  stageMessage?: string;
   error?: string;
   audioUrl?: string;
   client?: string;
@@ -85,6 +171,8 @@ export interface Job {
   keyPoints?: string[];
   notes?: NoteSection[];
   analysis?: JobAnalysis;
+  bookmarks?: Bookmark[];
+  actionItems?: ActionItem[];
 }
 
 export interface OutputSelections {
@@ -92,6 +180,33 @@ export interface OutputSelections {
   notes: boolean;
   analysis: boolean;
   subtitles: boolean;
+}
+
+export interface DiarizeSpeakersResult {
+  speakers: Speaker[];
+  transcript: TranscriptSegment[];
+  reasoning: string;
+  changedCount: number;
+}
+
+export interface AiSummarizeResult {
+  summary: string;
+  keyPoints: string[];
+  decisions: string[];
+  questionsRaised: string[];
+  actionItems: ActionItem[];
+  followUps: string[];
+}
+
+export interface TranscriptSearchHit {
+  jobId: string;
+  jobTitle: string;
+  segmentId: string;
+  speakerId: string;
+  speakerName: string;
+  start: number;
+  end: number;
+  text: string;
 }
 
 export interface UploadJobPayload {
@@ -108,9 +223,18 @@ export interface AppSettings {
   defaultOutputs: OutputSelections;
   defaultSubtitleFormat: SubtitleFormat;
   subtitleIncludeSpeakers: boolean;
+  defaultTranscriptMode: TranscriptViewMode;
+  exportIncludeTimestamps: boolean;
+  exportIncludeSpeakers: boolean;
   theme: ThemeMode;
   liveBackground: LiveBackgroundMode;
+  backgroundOpacity: number;
+  backgroundSpeed: number;
+  customBackground: CustomBackgroundConfig;
   apiBaseUrl: string;
+  diarizationConfidenceThreshold: number;
+  autoFlagUncertainSpeakers: boolean;
+  enableCloudAi: boolean;
 }
 
 export interface NotificationItem {
@@ -138,16 +262,9 @@ export interface UploadTask {
   jobId?: string;
 }
 
-export interface WorkspaceOption {
-  id: string;
-  name: string;
-  plan: string;
-  hoursUsed: number;
-  hoursLimit: number;
-}
-
 export type AppRoute =
   | { view: 'dashboard' }
   | { view: 'library' }
   | { view: 'job'; jobId: string; seekTo?: number }
+  | { view: 'profile' }
   | { view: 'settings' };

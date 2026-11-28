@@ -1,17 +1,28 @@
 import { createInitialMockJobs } from './mockData';
 import {
+  ActionItem,
+  AiSummarizeResult,
   AppSettings,
+  AudioFormat,
+  Bookmark,
+  CustomBackgroundConfig,
+  DiarizeSpeakersResult,
   ExportFormat,
+  ExportOptions,
   Job,
   JobAnalysis,
   JobStatus,
   NoteSection,
   RegenerateSection,
   Speaker,
+  TranscriptSearchHit,
   TranscriptSegment,
+  TranscriptViewMode,
   UploadJobPayload,
+  UserProfile,
 } from './types';
-import { downloadMockExport, SubtitleBuildOptions } from './utils/exportMock';
+import { extractAudioWavFromFile, triggerBlobDownload } from './utils/audioExtract';
+import { downloadMockExport } from './utils/exportMock';
 import { getDistinctSpeakerColor, validateMediaFile } from './utils/format';
 import { getMockAudioUrl } from './utils/mockAudio';
 
@@ -35,6 +46,26 @@ export class ApiError extends Error {
   }
 }
 
+const VALID_TRANSCRIPT_MODES = new Set<TranscriptViewMode>([
+  'transcript',
+  'timestamped',
+]);
+
+const PROFILE_STORAGE_KEY = 'callscribe_profile_v1';
+
+export const DEFAULT_CUSTOM_BACKGROUND: CustomBackgroundConfig = {
+  baseStyle: 'gradient',
+  primaryColor: '#4f46e5',
+  secondaryColor: '#06b6d4',
+  tertiaryColor: '#ec4899',
+  angleDeg: 135,
+  pattern: 'dots',
+  motion: 'aurora',
+  imageDataUrl: '',
+  imageBlurPx: 4,
+  imageDimPercent: 45,
+};
+
 export const DEFAULT_SETTINGS: AppSettings = {
   defaultLanguage: 'auto',
   defaultOutputs: {
@@ -44,10 +75,19 @@ export const DEFAULT_SETTINGS: AppSettings = {
     subtitles: true,
   },
   defaultSubtitleFormat: 'srt',
-  subtitleIncludeSpeakers: true,
+  subtitleIncludeSpeakers: false,
+  defaultTranscriptMode: 'transcript',
+  exportIncludeTimestamps: true,
+  exportIncludeSpeakers: false,
   theme: 'dark',
   liveBackground: 'aurora',
+  backgroundOpacity: 100,
+  backgroundSpeed: 1,
+  customBackground: DEFAULT_CUSTOM_BACKGROUND,
   apiBaseUrl: '',
+  diarizationConfidenceThreshold: 0.55,
+  autoFlagUncertainSpeakers: false,
+  enableCloudAi: true,
 };
 
 export function loadStoredSettings(): AppSettings {
@@ -55,6 +95,7 @@ export function loadStoredSettings(): AppSettings {
     const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
     if (!raw) return DEFAULT_SETTINGS;
     const parsed = JSON.parse(raw) as Partial<AppSettings>;
+    const cb = parsed.customBackground;
     return {
       defaultLanguage: parsed.defaultLanguage ?? DEFAULT_SETTINGS.defaultLanguage,
       defaultOutputs: {
@@ -64,11 +105,61 @@ export function loadStoredSettings(): AppSettings {
         subtitles: parsed.defaultOutputs?.subtitles ?? DEFAULT_SETTINGS.defaultOutputs.subtitles,
       },
       defaultSubtitleFormat: parsed.defaultSubtitleFormat ?? DEFAULT_SETTINGS.defaultSubtitleFormat,
-      subtitleIncludeSpeakers:
-        parsed.subtitleIncludeSpeakers ?? DEFAULT_SETTINGS.subtitleIncludeSpeakers,
+      subtitleIncludeSpeakers: false,
+      defaultTranscriptMode:
+        parsed.defaultTranscriptMode && VALID_TRANSCRIPT_MODES.has(parsed.defaultTranscriptMode)
+          ? parsed.defaultTranscriptMode
+          : DEFAULT_SETTINGS.defaultTranscriptMode,
+      exportIncludeTimestamps:
+        typeof parsed.exportIncludeTimestamps === 'boolean'
+          ? parsed.exportIncludeTimestamps
+          : DEFAULT_SETTINGS.exportIncludeTimestamps,
+      exportIncludeSpeakers: false,
       theme: parsed.theme ?? DEFAULT_SETTINGS.theme,
       liveBackground: parsed.liveBackground ?? DEFAULT_SETTINGS.liveBackground,
+      backgroundOpacity:
+        typeof parsed.backgroundOpacity === 'number' && Number.isFinite(parsed.backgroundOpacity)
+          ? Math.max(20, Math.min(100, Math.round(parsed.backgroundOpacity)))
+          : DEFAULT_SETTINGS.backgroundOpacity,
+      backgroundSpeed:
+        typeof parsed.backgroundSpeed === 'number' && Number.isFinite(parsed.backgroundSpeed)
+          ? Math.max(0.25, Math.min(2.0, parsed.backgroundSpeed))
+          : DEFAULT_SETTINGS.backgroundSpeed,
+      customBackground: {
+        baseStyle: cb?.baseStyle ?? DEFAULT_CUSTOM_BACKGROUND.baseStyle,
+        primaryColor: cb?.primaryColor ?? DEFAULT_CUSTOM_BACKGROUND.primaryColor,
+        secondaryColor: cb?.secondaryColor ?? DEFAULT_CUSTOM_BACKGROUND.secondaryColor,
+        tertiaryColor: cb?.tertiaryColor ?? DEFAULT_CUSTOM_BACKGROUND.tertiaryColor,
+        angleDeg:
+          typeof cb?.angleDeg === 'number' && Number.isFinite(cb.angleDeg)
+            ? Math.max(0, Math.min(360, cb.angleDeg))
+            : DEFAULT_CUSTOM_BACKGROUND.angleDeg,
+        pattern: cb?.pattern ?? DEFAULT_CUSTOM_BACKGROUND.pattern,
+        motion: cb?.motion ?? DEFAULT_CUSTOM_BACKGROUND.motion,
+        imageDataUrl: typeof cb?.imageDataUrl === 'string' ? cb.imageDataUrl : '',
+        imageBlurPx:
+          typeof cb?.imageBlurPx === 'number' && Number.isFinite(cb.imageBlurPx)
+            ? Math.max(0, Math.min(24, cb.imageBlurPx))
+            : DEFAULT_CUSTOM_BACKGROUND.imageBlurPx,
+        imageDimPercent:
+          typeof cb?.imageDimPercent === 'number' && Number.isFinite(cb.imageDimPercent)
+            ? Math.max(0, Math.min(85, cb.imageDimPercent))
+            : DEFAULT_CUSTOM_BACKGROUND.imageDimPercent,
+      },
       apiBaseUrl: parsed.apiBaseUrl ?? DEFAULT_SETTINGS.apiBaseUrl,
+      diarizationConfidenceThreshold:
+        typeof parsed.diarizationConfidenceThreshold === 'number' &&
+        Number.isFinite(parsed.diarizationConfidenceThreshold)
+          ? Math.max(0.35, Math.min(0.85, parsed.diarizationConfidenceThreshold))
+          : DEFAULT_SETTINGS.diarizationConfidenceThreshold,
+      autoFlagUncertainSpeakers:
+        typeof parsed.autoFlagUncertainSpeakers === 'boolean'
+          ? parsed.autoFlagUncertainSpeakers
+          : DEFAULT_SETTINGS.autoFlagUncertainSpeakers,
+      enableCloudAi:
+        typeof parsed.enableCloudAi === 'boolean'
+          ? parsed.enableCloudAi
+          : DEFAULT_SETTINGS.enableCloudAi,
     };
   } catch {
     return DEFAULT_SETTINGS;
@@ -78,6 +169,53 @@ export function loadStoredSettings(): AppSettings {
 export function saveStoredSettings(settings: AppSettings): void {
   try {
     localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+function getBrowserTimezone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
+
+export const DEFAULT_USER_PROFILE: UserProfile = {
+  displayName: 'Eren Yeager',
+  email: 'yeagereren2777@gmail.com',
+  role: 'Workspace Owner',
+  organization: 'CallScribe Studio',
+  bio: 'Client meetings, engineering syncs, and structured call documentation.',
+  timezone: getBrowserTimezone(),
+  avatarUrl: '',
+  avatarColor: '#4f46e5',
+};
+
+export function loadStoredProfile(): UserProfile {
+  try {
+    const raw = localStorage.getItem(PROFILE_STORAGE_KEY);
+    if (!raw) return DEFAULT_USER_PROFILE;
+    const parsed = JSON.parse(raw) as Partial<UserProfile>;
+    return {
+      displayName: parsed.displayName?.trim() || DEFAULT_USER_PROFILE.displayName,
+      email: parsed.email?.trim() || DEFAULT_USER_PROFILE.email,
+      role: parsed.role ?? DEFAULT_USER_PROFILE.role,
+      organization: parsed.organization ?? DEFAULT_USER_PROFILE.organization,
+      bio: parsed.bio ?? DEFAULT_USER_PROFILE.bio,
+      timezone: parsed.timezone || DEFAULT_USER_PROFILE.timezone,
+      avatarUrl: typeof parsed.avatarUrl === 'string' ? parsed.avatarUrl : '',
+      avatarColor: parsed.avatarColor || DEFAULT_USER_PROFILE.avatarColor,
+    };
+  } catch {
+    return DEFAULT_USER_PROFILE;
+  }
+}
+
+export function saveStoredProfile(profile: UserProfile): void {
+  try {
+    localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
   } catch {
     // Ignore storage quota errors
   }
@@ -176,6 +314,8 @@ interface MockJobLifecycle {
 
 let mockJobs: Job[] = createInitialMockJobs();
 const mockLifecycles = new Map<string, MockJobLifecycle>();
+const mockUploadedFiles = new Map<string, File>();
+const mockObjectUrls = new Map<string, string>();
 
 // Register the 2 initial processing jobs so they advance in real time:
 // 1) "transcribing" at ~40%
@@ -227,7 +367,7 @@ function buildCompletedMockContent(job: Job, context?: string): Partial<Job> {
       },
     ];
     return {
-      audioUrl: getMockAudioUrl(),
+      audioUrl: job.audioUrl ?? getMockAudioUrl(),
       speakers: [
         { id: 'spk-1', name: 'Rohan Joshi', color: getDistinctSpeakerColor(0) },
         { id: 'spk-2', name: 'Sneha Kulkarni', color: getDistinctSpeakerColor(1) },
@@ -261,9 +401,12 @@ function buildCompletedMockContent(job: Job, context?: string): Partial<Job> {
     };
   }
 
+  const singleSpeaker = job.speakers.length === 1;
   const contextSuffix = context?.trim() ? ` Context noted: "${context.trim()}".` : '';
   const speaker1Name = job.speakers[0]?.name || (isHindi ? 'Priya Deshmukh' : 'Nadia Vance');
-  const speaker2Name = job.speakers[1]?.name || (isHindi ? 'Vikram Rao' : 'Liam O’Connor');
+  const speaker2Name = singleSpeaker
+    ? speaker1Name
+    : job.speakers[1]?.name || (isHindi ? 'Vikram Rao' : 'Liam O’Connor');
 
   const transcript: TranscriptSegment[] = [
     {
@@ -277,7 +420,7 @@ function buildCompletedMockContent(job: Job, context?: string): Partial<Job> {
       id: `${job.id}-s2`,
       start: 45,
       end: 98,
-      speakerId: 'spk-2',
+      speakerId: singleSpeaker ? 'spk-1' : 'spk-2',
       text: 'Our main goal this quarter is reducing onboarding time for enterprise workspaces while keeping audit trails intact. Pricing predictability matters most to our finance lead.',
     },
     {
@@ -291,17 +434,19 @@ function buildCompletedMockContent(job: Job, context?: string): Partial<Job> {
       id: `${job.id}-s4`,
       start: 159,
       end: 214,
-      speakerId: 'spk-2',
+      speakerId: singleSpeaker ? 'spk-1' : 'spk-2',
       text: 'Let us lock Week 3 for the pilot cohort of 12 team leads and circulate the security checklist tomorrow morning.',
     },
   ];
 
   return {
-    audioUrl: getMockAudioUrl(),
-    speakers: [
-      { id: 'spk-1', name: speaker1Name, color: job.speakers[0]?.color ?? getDistinctSpeakerColor(0) },
-      { id: 'spk-2', name: speaker2Name, color: job.speakers[1]?.color ?? getDistinctSpeakerColor(1) },
-    ],
+    audioUrl: job.audioUrl ?? getMockAudioUrl(),
+    speakers: singleSpeaker
+      ? [{ id: 'spk-1', name: speaker1Name, color: job.speakers[0]?.color ?? getDistinctSpeakerColor(0) }]
+      : [
+          { id: 'spk-1', name: speaker1Name, color: job.speakers[0]?.color ?? getDistinctSpeakerColor(0) },
+          { id: 'spk-2', name: speaker2Name, color: job.speakers[1]?.color ?? getDistinctSpeakerColor(1) },
+        ],
     transcript,
     summary: `Both teams aligned on a two-phase rollout for ${job.title}, targeting an initial 12-user pilot cohort in Week 3 and full SSO/reporting launch in Week 6.${contextSuffix}`,
     keyPoints: [
@@ -351,16 +496,28 @@ function advanceMockJobs(): void {
     );
 
     let status: JobStatus = job.status;
+    let stageMessage: string | undefined;
     if (progress >= 100) {
       status = 'done';
-    } else if (progress >= 78) {
+      stageMessage = 'Completed transcription and alignment.';
+    } else if (progress >= 84) {
       status = 'analyzing';
-    } else if (progress >= 38) {
+      stageMessage = 'Extracting structured summary & insights...';
+    } else if (progress >= 72) {
+      status = 'aligning';
+      stageMessage = 'Refining readable segments and timestamps...';
+    } else if (progress >= 58) {
+      status = 'diarizing';
+      stageMessage = 'Formatting paragraphs and sentence flow...';
+    } else if (progress >= 30) {
       status = 'transcribing';
-    } else if (progress >= 15) {
+      stageMessage = 'Transcribing speech with timestamps...';
+    } else if (progress >= 12) {
       status = 'extracting_audio';
+      stageMessage = 'Preparing 16 kHz mono audio track...';
     } else {
       status = 'queued';
+      stageMessage = 'Queued for local transcription...';
     }
 
     if (status === 'done') {
@@ -371,6 +528,7 @@ function advanceMockJobs(): void {
         ...completedFields,
         status: 'done',
         progress: 100,
+        stageMessage,
       };
     }
 
@@ -378,6 +536,7 @@ function advanceMockJobs(): void {
       ...job,
       status,
       progress,
+      stageMessage,
     };
   });
 }
@@ -390,9 +549,12 @@ const VALID_JOB_STATUSES = new Set<JobStatus>([
   'queued',
   'extracting_audio',
   'transcribing',
+  'diarizing',
+  'aligning',
   'analyzing',
   'done',
   'failed',
+  'cancelled',
 ]);
 
 function getDefaultHttpErrorMessage(status: number): string {
@@ -510,6 +672,10 @@ function normalizeTranscript(rawTranscript: unknown): TranscriptSegment[] | unde
           ? item.speakerId
           : 'spk-1',
       text: typeof item.text === 'string' ? item.text : '',
+      ...(typeof item.confidence === 'number' && Number.isFinite(item.confidence)
+        ? { confidence: Math.max(0, Math.min(1, item.confidence)) }
+        : {}),
+      ...(typeof item.uncertain === 'boolean' ? { uncertain: item.uncertain } : {}),
     }));
 }
 
@@ -522,6 +688,53 @@ function normalizeNotes(rawNotes: unknown): NoteSection[] | undefined {
       heading: typeof item.heading === 'string' ? item.heading : 'Notes',
       bullets: asStringArray(item.bullets),
     }));
+}
+
+function normalizeBookmarks(rawBookmarks: unknown): Bookmark[] | undefined {
+  if (rawBookmarks === undefined || rawBookmarks === null) return undefined;
+  if (!Array.isArray(rawBookmarks)) return undefined;
+  return rawBookmarks
+    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+    .map((item, idx) => {
+      const cat = item.category;
+      const category =
+        cat === 'important' ||
+        cat === 'question' ||
+        cat === 'decision' ||
+        cat === 'follow-up' ||
+        cat === 'note'
+          ? cat
+          : 'important';
+      return {
+        id: typeof item.id === 'string' && item.id.trim() ? item.id : `bm-${idx + 1}`,
+        timeSec:
+          typeof item.timeSec === 'number' && Number.isFinite(item.timeSec)
+            ? Math.max(0, item.timeSec)
+            : 0,
+        category,
+        label: typeof item.label === 'string' && item.label.trim() ? item.label : 'Bookmark',
+        ...(typeof item.note === 'string' && item.note.trim() ? { note: item.note } : {}),
+        ...(typeof item.createdAt === 'string' ? { createdAt: item.createdAt } : {}),
+      };
+    });
+}
+
+function normalizeActionItems(rawItems: unknown): ActionItem[] | undefined {
+  if (rawItems === undefined || rawItems === null) return undefined;
+  if (!Array.isArray(rawItems)) return undefined;
+  return rawItems
+    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+    .map((item, idx) => ({
+      id: typeof item.id === 'string' && item.id.trim() ? item.id : `act-${idx + 1}`,
+      task: typeof item.task === 'string' ? item.task : '',
+      ...(typeof item.owner === 'string' && item.owner.trim() ? { owner: item.owner } : {}),
+      ...(typeof item.deadline === 'string' && item.deadline.trim() ? { deadline: item.deadline } : {}),
+      ...(typeof item.timestampSec === 'number' && Number.isFinite(item.timestampSec)
+        ? { timestampSec: Math.max(0, item.timestampSec) }
+        : {}),
+      completed: Boolean(item.completed),
+    }))
+    .filter((item) => item.task.trim().length > 0);
 }
 
 function normalizeAnalysis(rawAnalysis: unknown): JobAnalysis | undefined {
@@ -541,6 +754,9 @@ function normalizeAnalysis(rawAnalysis: unknown): JobAnalysis | undefined {
     concerns: asStringArray(obj.concerns),
     risks: asStringArray(obj.risks),
     nextSteps: asStringArray(obj.nextSteps),
+    ...(Array.isArray(obj.questionsRaised)
+      ? { questionsRaised: asStringArray(obj.questionsRaised) }
+      : {}),
   };
 }
 
@@ -584,6 +800,10 @@ function normalizeJob(raw: unknown, baseUrl?: string): Job {
     language: typeof obj.language === 'string' && obj.language.trim() ? obj.language : 'auto',
     status,
     progress,
+    stageMessage:
+      typeof obj.stageMessage === 'string' && obj.stageMessage.trim()
+        ? obj.stageMessage.trim()
+        : undefined,
     error: typeof obj.error === 'string' && obj.error.trim() ? sanitizeErrorText(obj.error) : undefined,
     audioUrl,
     client: typeof obj.client === 'string' ? obj.client : undefined,
@@ -595,6 +815,8 @@ function normalizeJob(raw: unknown, baseUrl?: string): Job {
     keyPoints: Array.isArray(obj.keyPoints) ? asStringArray(obj.keyPoints) : undefined,
     notes: normalizeNotes(obj.notes),
     analysis: normalizeAnalysis(obj.analysis),
+    bookmarks: normalizeBookmarks(obj.bookmarks),
+    actionItems: normalizeActionItems(obj.actionItems),
   };
 }
 
@@ -750,23 +972,29 @@ export function createJob(
           window.clearInterval(timer);
           const id = `job-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
           const inferredSpeakers =
-            payload.speakers === '3'
-              ? [
-                  { id: 'spk-1', name: 'Speaker 1', color: getDistinctSpeakerColor(0) },
-                  { id: 'spk-2', name: 'Speaker 2', color: getDistinctSpeakerColor(1) },
-                  { id: 'spk-3', name: 'Speaker 3', color: getDistinctSpeakerColor(2) },
-                ]
-              : payload.speakers === '4+'
+            payload.speakers === '1'
+              ? [{ id: 'spk-1', name: 'Speaker 1', color: getDistinctSpeakerColor(0) }]
+              : payload.speakers === '3'
                 ? [
                     { id: 'spk-1', name: 'Speaker 1', color: getDistinctSpeakerColor(0) },
                     { id: 'spk-2', name: 'Speaker 2', color: getDistinctSpeakerColor(1) },
                     { id: 'spk-3', name: 'Speaker 3', color: getDistinctSpeakerColor(2) },
-                    { id: 'spk-4', name: 'Speaker 4', color: getDistinctSpeakerColor(3) },
                   ]
-                : [
-                    { id: 'spk-1', name: 'Speaker 1', color: getDistinctSpeakerColor(0) },
-                    { id: 'spk-2', name: 'Speaker 2', color: getDistinctSpeakerColor(1) },
-                  ];
+                : payload.speakers === '4+'
+                  ? [
+                      { id: 'spk-1', name: 'Speaker 1', color: getDistinctSpeakerColor(0) },
+                      { id: 'spk-2', name: 'Speaker 2', color: getDistinctSpeakerColor(1) },
+                      { id: 'spk-3', name: 'Speaker 3', color: getDistinctSpeakerColor(2) },
+                      { id: 'spk-4', name: 'Speaker 4', color: getDistinctSpeakerColor(3) },
+                    ]
+                  : [
+                      { id: 'spk-1', name: 'Speaker 1', color: getDistinctSpeakerColor(0) },
+                      { id: 'spk-2', name: 'Speaker 2', color: getDistinctSpeakerColor(1) },
+                    ];
+
+          const localMediaUrl = URL.createObjectURL(payload.file);
+          mockUploadedFiles.set(id, payload.file);
+          mockObjectUrls.set(id, localMediaUrl);
 
           const newJob: Job = {
             id,
@@ -779,6 +1007,7 @@ export function createJob(
             language: payload.language === 'auto' ? 'en' : payload.language,
             status: 'queued',
             progress: 4,
+            audioUrl: localMediaUrl,
             speakers: inferredSpeakers,
             transcript: [],
           };
@@ -941,7 +1170,21 @@ export async function getJob(id: string, signal?: AbortSignal): Promise<Job> {
 }
 
 export type PatchJobBody = Partial<
-  Pick<Job, 'title' | 'speakers' | 'transcript' | 'notes' | 'pinned' | 'client' | 'tags'>
+  Pick<
+    Job,
+    | 'title'
+    | 'speakers'
+    | 'transcript'
+    | 'summary'
+    | 'keyPoints'
+    | 'notes'
+    | 'analysis'
+    | 'bookmarks'
+    | 'actionItems'
+    | 'pinned'
+    | 'client'
+    | 'tags'
+  >
 >;
 
 /**
@@ -971,7 +1214,34 @@ export async function patchJob(id: string, body: PatchJobBody): Promise<Job> {
 }
 
 /**
- * Retry / reprocess a failed or completed job via POST /api/jobs/{id}/regenerate.
+ * POST /api/jobs/{id}/cancel -> Job
+ */
+export async function cancelJob(id: string): Promise<Job> {
+  if (isMockMode()) {
+    await new Promise((r) => setTimeout(r, 120));
+    const idx = mockJobs.findIndex((j) => j.id === id);
+    if (idx === -1) throw new ApiError('Recording not found', 404);
+    mockLifecycles.delete(id);
+    const updated: Job = {
+      ...mockJobs[idx],
+      status: 'cancelled',
+      progress: 0,
+      stageMessage: 'Cancelled by user.',
+      error: 'Processing was cancelled by user.',
+    };
+    mockJobs[idx] = updated;
+    return structuredClone(updated);
+  }
+
+  const baseUrl = requireValidatedApiBaseUrl();
+  const raw = await apiFetch<unknown>(`/api/jobs/${encodeURIComponent(id)}/cancel`, {
+    method: 'POST',
+  });
+  return normalizeJob(raw, baseUrl);
+}
+
+/**
+ * Retry / reprocess a failed, cancelled, or completed job via POST /api/jobs/{id}/retry.
  */
 export async function reprocessJob(id: string): Promise<Job> {
   if (isMockMode()) {
@@ -982,6 +1252,7 @@ export async function reprocessJob(id: string): Promise<Job> {
       ...mockJobs[idx],
       status: 'queued',
       progress: 5,
+      stageMessage: 'Re-queued for transcription...',
       error: undefined,
     };
     mockJobs[idx] = updated;
@@ -994,11 +1265,62 @@ export async function reprocessJob(id: string): Promise<Job> {
   }
 
   const baseUrl = requireValidatedApiBaseUrl();
-  const raw = await apiFetch<unknown>(`/api/jobs/${encodeURIComponent(id)}/regenerate`, {
+  const raw = await apiFetch<unknown>(`/api/jobs/${encodeURIComponent(id)}/retry`, {
     method: 'POST',
-    body: JSON.stringify({ section: 'summary' }),
   });
   return normalizeJob(raw, baseUrl);
+}
+
+export const retryJob = reprocessJob;
+
+/**
+ * GET /api/jobs/search?q=... -> TranscriptSearchHit[]
+ */
+export async function searchTranscripts(
+  query: string,
+  signal?: AbortSignal
+): Promise<TranscriptSearchHit[]> {
+  const trimmed = query.trim();
+  if (trimmed.length < 2) return [];
+
+  if (isMockMode()) {
+    const q = trimmed.toLowerCase();
+    const hits: TranscriptSearchHit[] = [];
+    for (const job of mockJobs) {
+      if (!job.transcript?.length) continue;
+      const speakerMap = new Map(job.speakers.map((s) => [s.id, s.name]));
+      for (const seg of job.transcript) {
+        if (seg.text.toLowerCase().includes(q)) {
+          hits.push({
+            jobId: job.id,
+            jobTitle: job.title,
+            segmentId: seg.id,
+            speakerId: seg.speakerId,
+            speakerName: speakerMap.get(seg.speakerId) ?? seg.speakerId,
+            start: seg.start,
+            end: seg.end,
+            text: seg.text,
+          });
+          if (hits.length >= 25) return hits;
+        }
+      }
+    }
+    return hits;
+  }
+
+  const params = new URLSearchParams({ q: trimmed, limit: '25' });
+  const raw = await apiFetch<unknown>(`/api/jobs/search?${params.toString()}`, { signal });
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (item): item is TranscriptSearchHit =>
+      Boolean(
+        item &&
+          typeof item === 'object' &&
+          typeof (item as TranscriptSearchHit).jobId === 'string' &&
+          typeof (item as TranscriptSearchHit).segmentId === 'string' &&
+          typeof (item as TranscriptSearchHit).text === 'string'
+      )
+  );
 }
 
 /**
@@ -1061,30 +1383,33 @@ export async function regenerateSection(
 export async function exportJob(
   id: string,
   format: ExportFormat,
-  subtitleOptions?: SubtitleBuildOptions
+  exportOptions?: ExportOptions
 ): Promise<void> {
   const settings = loadStoredSettings();
   const isSubtitleFormat = format === 'srt' || format === 'vtt';
-  const effectiveIncludeSpeakers =
-    subtitleOptions?.includeSpeakers ?? settings.subtitleIncludeSpeakers;
+  const effectiveIncludeTimestamps =
+    exportOptions?.includeTimestamps ?? settings.exportIncludeTimestamps;
+  const effectiveIncludeSpeakers = exportOptions?.includeSpeakers ?? false;
 
   if (isMockMode()) {
     const job = mockJobs.find((j) => j.id === id);
     if (!job) throw new ApiError('Recording not found', 404);
     downloadMockExport(job, format, {
+      includeTimestamps: effectiveIncludeTimestamps,
       includeSpeakers: effectiveIncludeSpeakers,
-      offsetSec: subtitleOptions?.offsetSec ?? 0,
+      offsetSec: exportOptions?.offsetSec ?? 0,
     });
     return;
   }
 
   const baseUrl = requireValidatedApiBaseUrl();
-  const params = new URLSearchParams({ format });
-  if (isSubtitleFormat) {
-    params.set('speakers', String(effectiveIncludeSpeakers));
-    if (subtitleOptions?.offsetSec !== undefined && subtitleOptions.offsetSec !== 0) {
-      params.set('offsetSec', String(subtitleOptions.offsetSec));
-    }
+  const params = new URLSearchParams({
+    format,
+    timestamps: String(effectiveIncludeTimestamps),
+    speakers: String(effectiveIncludeSpeakers),
+  });
+  if (isSubtitleFormat && exportOptions?.offsetSec !== undefined && exportOptions.offsetSec !== 0) {
+    params.set('offsetSec', String(exportOptions.offsetSec));
   }
 
   const url = `${baseUrl}/api/jobs/${encodeURIComponent(id)}/export?${params.toString()}`;
@@ -1132,6 +1457,90 @@ export async function exportJob(
 }
 
 /**
+ * GET /api/jobs/{id}/audio?format=mp3|wav
+ * Extracts/streams the audio track from an uploaded video or audio recording.
+ */
+export async function downloadJobAudio(
+  id: string,
+  format: AudioFormat = 'mp3'
+): Promise<{ actualFormat: AudioFormat }> {
+  if (isMockMode()) {
+    const job = mockJobs.find((j) => j.id === id);
+    if (!job) throw new ApiError('Recording not found', 404);
+
+    const safeBase =
+      job.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') ||
+      'callscribe-audio';
+
+    const uploadedFile = mockUploadedFiles.get(id);
+    if (uploadedFile) {
+      const lowerName = uploadedFile.name.toLowerCase();
+      if (lowerName.endsWith(`.${format}`)) {
+        triggerBlobDownload(uploadedFile, `${safeBase}.${format}`);
+        return { actualFormat: format };
+      }
+      const wavBlob = await extractAudioWavFromFile(uploadedFile);
+      triggerBlobDownload(wavBlob, `${safeBase}.wav`);
+      return { actualFormat: 'wav' };
+    }
+
+    if (job.audioUrl) {
+      const res = await fetch(job.audioUrl);
+      if (!res.ok) {
+        throw new ApiError('Audio stream is unavailable for this recording.', res.status);
+      }
+      const blob = await res.blob();
+      if (blob.size === 0) {
+        throw new ApiError('Audio stream returned an empty file.', 500);
+      }
+      triggerBlobDownload(blob, `${safeBase}.wav`);
+      return { actualFormat: 'wav' };
+    }
+
+    throw new ApiError('No media file is available for audio download.', 404);
+  }
+
+  const baseUrl = requireValidatedApiBaseUrl();
+  const params = new URLSearchParams({ format });
+  const url = `${baseUrl}/api/jobs/${encodeURIComponent(id)}/audio?${params.toString()}`;
+
+  let res: Response;
+  try {
+    res = await fetch(url);
+  } catch {
+    throw new ApiError(
+      `Cannot download audio from ${baseUrl}. Check connectivity and CORS configuration.`,
+      0,
+      { isNetworkError: true }
+    );
+  }
+
+  if (!res.ok) {
+    let bodyText = '';
+    try {
+      bodyText = await res.text();
+    } catch {
+      bodyText = '';
+    }
+    throw new ApiError(extractErrorMessage(res.status, bodyText), res.status);
+  }
+
+  const blob = await res.blob();
+  if (blob.size === 0) {
+    throw new ApiError('Audio download returned an empty file.', res.status);
+  }
+
+  const safeFallbackId = id.replace(/[^a-zA-Z0-9_-]+/g, '-');
+  const fallbackName = `callscribe-${safeFallbackId}.${format}`;
+  const filename = parseContentDispositionFilename(
+    res.headers.get('content-disposition'),
+    fallbackName
+  );
+  triggerBlobDownload(blob, filename);
+  return { actualFormat: format };
+}
+
+/**
  * DELETE /api/jobs/{id}
  */
 export async function deleteJob(id: string): Promise<void> {
@@ -1139,6 +1548,12 @@ export async function deleteJob(id: string): Promise<void> {
     await new Promise((r) => setTimeout(r, 120));
     mockJobs = mockJobs.filter((j) => j.id !== id);
     mockLifecycles.delete(id);
+    mockUploadedFiles.delete(id);
+    const objUrl = mockObjectUrls.get(id);
+    if (objUrl) {
+      URL.revokeObjectURL(objUrl);
+      mockObjectUrls.delete(id);
+    }
     return;
   }
 
@@ -1147,3 +1562,136 @@ export async function deleteJob(id: string): Promise<void> {
     allowEmpty: true,
   });
 }
+
+/**
+ * POST /api/ai/diarize-speakers (same-origin Express AI route)
+ * Uses server-side Gemini to differentiate speakers across generated transcript segments.
+ */
+export async function diarizeJobSpeakers(
+  job: Job,
+  expectedSpeakers?: number,
+  options?: { mode?: 'infer_names' | 'full_assist'; confidenceThreshold?: number }
+): Promise<DiarizeSpeakersResult> {
+  const settings = loadStoredSettings();
+  if (!settings.enableCloudAi) {
+    throw new ApiError(
+      'Optional Gemini AI assistance is turned off in Settings > AI & Privacy.',
+      403
+    );
+  }
+  const transcript = job.transcript ?? [];
+  if (transcript.length === 0) {
+    throw new ApiError('No transcript segments are available to analyze.', 400);
+  }
+
+  let res: Response;
+  try {
+    res = await fetch('/api/ai/diarize-speakers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: job.title,
+        language: job.language,
+        expectedSpeakers,
+        mode: options?.mode ?? 'full_assist',
+        confidenceThreshold: options?.confidenceThreshold ?? settings.diarizationConfidenceThreshold,
+        speakers: job.speakers,
+        transcript,
+      }),
+    });
+  } catch {
+    throw new ApiError(
+      'Could not reach the AI speaker differentiation service.',
+      0,
+      { isNetworkError: true }
+    );
+  }
+
+  if (!res.ok) {
+    let bodyText = '';
+    try {
+      bodyText = await res.text();
+    } catch {
+      bodyText = '';
+    }
+    throw new ApiError(extractErrorMessage(res.status, bodyText), res.status);
+  }
+
+  const data = (await res.json()) as Partial<DiarizeSpeakersResult>;
+  if (!Array.isArray(data.speakers) || !Array.isArray(data.transcript)) {
+    throw new ApiError('Malformed response from AI speaker differentiation service.', 502);
+  }
+
+  return {
+    speakers: normalizeSpeakers(data.speakers),
+    transcript: normalizeTranscript(data.transcript) ?? transcript,
+    reasoning:
+      typeof data.reasoning === 'string' && data.reasoning.trim()
+        ? data.reasoning.trim()
+        : 'Speakers differentiated across transcript segments.',
+    changedCount: typeof data.changedCount === 'number' ? data.changedCount : 0,
+  };
+}
+
+/**
+ * POST /api/ai/summarize (same-origin Express AI route)
+ * Sends transcript text + speaker names only (never audio) to Gemini for optional summary & action items.
+ */
+export async function summarizeJobWithAi(job: Job): Promise<AiSummarizeResult> {
+  const settings = loadStoredSettings();
+  if (!settings.enableCloudAi) {
+    throw new ApiError(
+      'Optional Gemini AI summarization is turned off in Settings > AI & Privacy.',
+      403
+    );
+  }
+  const transcript = job.transcript ?? [];
+  if (transcript.length === 0) {
+    throw new ApiError('No transcript segments are available to summarize.', 400);
+  }
+
+  let res: Response;
+  try {
+    res = await fetch('/api/ai/summarize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: job.title,
+        language: job.language,
+        speakers: job.speakers,
+        transcript,
+      }),
+    });
+  } catch {
+    throw new ApiError(
+      'Could not reach the AI summarization service.',
+      0,
+      { isNetworkError: true }
+    );
+  }
+
+  if (!res.ok) {
+    let bodyText = '';
+    try {
+      bodyText = await res.text();
+    } catch {
+      bodyText = '';
+    }
+    throw new ApiError(extractErrorMessage(res.status, bodyText), res.status);
+  }
+
+  const data = (await res.json()) as Partial<AiSummarizeResult>;
+  if (typeof data.summary !== 'string' || !data.summary.trim()) {
+    throw new ApiError('Malformed response from AI summarization service.', 502);
+  }
+
+  return {
+    summary: data.summary.trim(),
+    keyPoints: asStringArray(data.keyPoints),
+    decisions: asStringArray(data.decisions),
+    questionsRaised: asStringArray(data.questionsRaised),
+    actionItems: normalizeActionItems(data.actionItems) ?? [],
+    followUps: asStringArray(data.followUps),
+  };
+}
+

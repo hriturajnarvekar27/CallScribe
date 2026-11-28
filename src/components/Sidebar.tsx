@@ -3,7 +3,6 @@ import {
   AlertCircle,
   AudioWaveform,
   Check,
-  ChevronsUpDown,
   FolderKanban,
   LayoutDashboard,
   Loader2,
@@ -14,10 +13,12 @@ import {
   Plus,
   Settings,
   Sparkles,
+  User,
   X,
 } from 'lucide-react';
+import { getProfileInitials } from '../hooks/useProfile';
 import { LIVE_BACKGROUND_OPTIONS, THEME_OPTIONS } from '../hooks/useSettings';
-import { AppRoute, Job, LiveBackgroundMode, ThemeMode, WorkspaceOption } from '../types';
+import { AppRoute, Job, LiveBackgroundMode, ThemeMode, UserProfile } from '../types';
 import { isProcessingStatus } from '../utils/format';
 
 interface SidebarProps {
@@ -31,9 +32,7 @@ interface SidebarProps {
   onChangeTheme: (theme: ThemeMode) => void;
   liveBackground: LiveBackgroundMode;
   onChangeLiveBackground: (mode: LiveBackgroundMode) => void;
-  workspaces: WorkspaceOption[];
-  activeWorkspaceId: string;
-  onSelectWorkspace: (id: string) => void;
+  profile: UserProfile;
   onSignOut: () => void;
   mobileOpen: boolean;
   onCloseMobile: () => void;
@@ -50,9 +49,7 @@ export function Sidebar({
   onChangeTheme,
   liveBackground,
   onChangeLiveBackground,
-  workspaces,
-  activeWorkspaceId,
-  onSelectWorkspace,
+  profile,
   onSignOut,
   mobileOpen,
   onCloseMobile,
@@ -65,11 +62,6 @@ export function Sidebar({
   const bgMenuRef = useRef<HTMLDivElement>(null);
 
   const activeJobId = route.view === 'job' ? route.jobId : null;
-  const activeWorkspace =
-    workspaces.find((w) => w.id === activeWorkspaceId) ?? workspaces[0];
-  const usagePct = activeWorkspace
-    ? Math.min(100, Math.round((activeWorkspace.hoursUsed / activeWorkspace.hoursLimit) * 100))
-    : 0;
 
   useEffect(() => {
     const onOutside = (e: MouseEvent) => {
@@ -95,6 +87,7 @@ export function Sidebar({
   }[] = [
     { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { key: 'library', label: 'Library', icon: FolderKanban, badge: recentJobs.length || undefined },
+    { key: 'profile', label: 'Profile', icon: User },
     { key: 'settings', label: 'Settings', icon: Settings },
   ];
 
@@ -103,6 +96,7 @@ export function Sidebar({
   const currentBgObj =
     LIVE_BACKGROUND_OPTIONS.find((b) => b.value === liveBackground) ??
     LIVE_BACKGROUND_OPTIONS[0];
+  const initials = getProfileInitials(profile.displayName, profile.email);
 
   const renderSidebarBody = (isMobileDrawer = false) => {
     const isMini = collapsed && !isMobileDrawer;
@@ -262,27 +256,8 @@ export function Sidebar({
           )}
         </div>
 
-        {/* Bottom: Usage Meter + Theme Switcher + User Menu */}
+        {/* Bottom: Live Background + Theme Switcher + User Menu */}
         <div className="space-y-2.5 border-t border-zinc-200/80 pt-3 dark:border-zinc-800">
-          {/* Usage Meter */}
-          {!isMini && activeWorkspace && (
-            <div className="rounded-xl border border-zinc-200/80 bg-white/70 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-950/60">
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="font-medium text-zinc-600 dark:text-zinc-300">
-                  {activeWorkspace.plan}
-                </span>
-                <span className="font-mono tabular-nums text-zinc-500 dark:text-zinc-400">
-                  {activeWorkspace.hoursUsed}/{activeWorkspace.hoursLimit}h
-                </span>
-              </div>
-              <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
-                <div
-                  className="cs-progress-fill h-full rounded-full bg-indigo-600 transition-all duration-300 dark:bg-indigo-500"
-                  style={{ width: `${usagePct}%` }}
-                />
-              </div>
-            </div>
-          )}
 
           {/* Live Background Picker Popover */}
           <div className="relative" ref={bgMenuRef}>
@@ -307,10 +282,23 @@ export function Sidebar({
               <div
                 role="menu"
                 aria-label="Choose live background"
-                className="cs-surface absolute bottom-full left-0 z-50 mb-2 w-60 overflow-hidden rounded-xl border border-zinc-200 bg-white p-1.5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900"
+                className="cs-surface cs-scrollbar absolute bottom-full left-0 z-50 mb-2 max-h-80 w-64 overflow-y-auto rounded-xl border border-zinc-200 bg-white p-1.5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900"
               >
-                <div className="px-2 py-1 text-[10px] font-semibold text-zinc-400">
-                  Live backgrounds
+                <div className="flex items-center justify-between px-2 py-1">
+                  <span className="text-[10px] font-semibold text-zinc-400">
+                    Live backgrounds
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBgMenuOpen(false);
+                      onNavigate({ view: 'settings' });
+                      onCloseMobile();
+                    }}
+                    className="cs-accent-text text-[10px] font-medium text-indigo-600 hover:underline dark:text-indigo-400"
+                  >
+                    Customize
+                  </button>
                 </div>
                 {LIVE_BACKGROUND_OPTIONS.map((opt) => {
                   const selected = liveBackground === opt.value;
@@ -335,7 +323,9 @@ export function Sidebar({
                           {opt.description}
                         </p>
                       </div>
-                      {selected && <Check className="h-3.5 w-3.5 shrink-0 text-indigo-500" aria-hidden="true" />}
+                      {selected && (
+                        <Check className="cs-accent-text h-3.5 w-3.5 shrink-0 text-indigo-500" aria-hidden="true" />
+                      )}
                     </button>
                   );
                 })}
@@ -370,7 +360,7 @@ export function Sidebar({
               <div
                 role="menu"
                 aria-label="Choose theme"
-                className="cs-surface absolute bottom-full left-0 z-50 mb-2 w-56 overflow-hidden rounded-xl border border-zinc-200 bg-white p-1.5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900"
+                className="cs-surface cs-scrollbar absolute bottom-full left-0 z-50 mb-2 max-h-80 w-60 overflow-y-auto rounded-xl border border-zinc-200 bg-white p-1.5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900"
               >
                 <div className="px-2 py-1 text-[10px] font-semibold text-zinc-400">
                   Themes &amp; AMOLED Neon
@@ -392,9 +382,9 @@ export function Sidebar({
                           : 'text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800'
                       }`}
                     >
-                      <span className="flex items-center gap-2">
+                      <span className="flex items-center gap-2 min-w-0">
                         <span
-                          className="flex h-4 w-4 items-center justify-center rounded-full border border-zinc-300 dark:border-zinc-700"
+                          className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-zinc-300 dark:border-zinc-700"
                           style={{ backgroundColor: opt.previewBg }}
                           aria-hidden="true"
                         >
@@ -403,9 +393,11 @@ export function Sidebar({
                             style={{ backgroundColor: opt.previewAccent }}
                           />
                         </span>
-                        <span>{opt.label}</span>
+                        <span className="truncate">{opt.label}</span>
                       </span>
-                      {selected && <Check className="h-3.5 w-3.5 text-indigo-500" aria-hidden="true" />}
+                      {selected && (
+                        <Check className="cs-accent-text h-3.5 w-3.5 shrink-0 text-indigo-500" aria-hidden="true" />
+                      )}
                     </button>
                   );
                 })}
@@ -418,62 +410,79 @@ export function Sidebar({
             <button
               type="button"
               onClick={() => setUserMenuOpen((o) => !o)}
-              title={isMini ? `${activeWorkspace?.name ?? 'Workspace'}` : undefined}
+              title={isMini ? `${profile.displayName} (${profile.email})` : undefined}
               className={`flex w-full items-center rounded-xl py-1.5 text-left transition-colors hover:bg-zinc-200/60 dark:hover:bg-zinc-800 ${
-                isMini ? 'justify-center px-1' : 'justify-between gap-2 px-2'
+                isMini ? 'justify-center px-1' : 'gap-2.5 px-2'
               }`}
             >
-              <div className="flex min-w-0 items-center gap-2.5">
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-[11px] font-bold text-white dark:bg-indigo-500">
-                  YE
+              {profile.avatarUrl ? (
+                <img
+                  src={profile.avatarUrl}
+                  alt={profile.displayName}
+                  referrerPolicy="no-referrer"
+                  className="h-7 w-7 shrink-0 rounded-full object-cover ring-1 ring-zinc-300 dark:ring-zinc-700"
+                />
+              ) : (
+                <span
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white"
+                  style={{ backgroundColor: profile.avatarColor }}
+                >
+                  {initials}
                 </span>
-                {!isMini && (
-                  <div className="min-w-0">
-                    <p className="truncate text-xs font-semibold text-zinc-900 dark:text-zinc-100">
-                      {activeWorkspace?.name ?? 'Workspace'}
-                    </p>
-                    <p className="truncate text-[10px] text-zinc-500 dark:text-zinc-400">
-                      yeagereren2777@gmail.com
-                    </p>
-                  </div>
-                )}
-              </div>
+              )}
               {!isMini && (
-                <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-zinc-400" aria-hidden="true" />
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+                    {profile.displayName}
+                  </p>
+                  <p className="truncate text-[10px] text-zinc-500 dark:text-zinc-400">
+                    {profile.email}
+                  </p>
+                </div>
               )}
             </button>
 
             {userMenuOpen && (
               <div
                 role="menu"
-                aria-label="Workspace and account menu"
+                aria-label="Account menu"
                 className="cs-surface absolute bottom-full left-0 z-50 mb-2 w-60 overflow-hidden rounded-xl border border-zinc-200 bg-white p-1.5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900"
               >
-                <div className="px-2 py-1 text-[10px] font-semibold text-zinc-400">
-                  Switch workspace
+                <div className="px-2 py-1.5">
+                  <p className="truncate text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+                    {profile.displayName}
+                  </p>
+                  <p className="truncate text-[11px] text-zinc-500 dark:text-zinc-400">
+                    {profile.email}
+                  </p>
                 </div>
-                {workspaces.map((ws) => {
-                  const selected = ws.id === activeWorkspaceId;
-                  return (
-                    <button
-                      key={ws.id}
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        onSelectWorkspace(ws.id);
-                        setUserMenuOpen(false);
-                      }}
-                      className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs transition-colors ${
-                        selected
-                          ? 'bg-zinc-100 font-semibold text-zinc-900 dark:bg-zinc-800 dark:text-zinc-50'
-                          : 'text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-800/60'
-                      }`}
-                    >
-                      <span className="truncate">{ws.name}</span>
-                      <span className="text-[10px] text-zinc-400">{ws.plan}</span>
-                    </button>
-                  );
-                })}
+                <div className="my-1 border-t border-zinc-100 dark:border-zinc-800" />
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    onNavigate({ view: 'profile' });
+                    setUserMenuOpen(false);
+                    onCloseMobile();
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                >
+                  <User className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span>Manage profile</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    onNavigate({ view: 'settings' });
+                    setUserMenuOpen(false);
+                    onCloseMobile();
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                >
+                  <Palette className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span>Themes &amp; backgrounds</span>
+                </button>
                 <div className="my-1 border-t border-zinc-100 dark:border-zinc-800" />
                 <button
                   type="button"

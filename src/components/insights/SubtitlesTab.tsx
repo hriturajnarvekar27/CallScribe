@@ -6,12 +6,12 @@ import {
   Minus,
   Plus,
   Subtitles,
-  UserCheck,
 } from 'lucide-react';
 import { exportJob, loadStoredSettings } from '../../api';
 import { Job, SubtitleFormat } from '../../types';
 import { buildSrt, buildVtt } from '../../utils/exportMock';
 import { formatSrtTime } from '../../utils/format';
+import { buildMeaningfulSegments } from '../../utils/transcriptFormat';
 import { useToast } from '../ToastProvider';
 
 interface SubtitlesTabProps {
@@ -27,17 +27,13 @@ export function SubtitlesTab({ job, currentTime, onSeek }: SubtitlesTabProps) {
   const [format, setFormat] = useState<SubtitleFormat>(
     initialSettings.defaultSubtitleFormat
   );
-  const [includeSpeakers, setIncludeSpeakers] = useState<boolean>(
-    initialSettings.subtitleIncludeSpeakers
-  );
   const [offsetSec, setOffsetSec] = useState<number>(0);
   const [copied, setCopied] = useState(false);
 
-  const segments = job.transcript ?? [];
-
-  const speakerMap = useMemo(() => {
-    return new Map(job.speakers.map((s) => [s.id, s]));
-  }, [job.speakers]);
+  const segments = useMemo(
+    () => buildMeaningfulSegments(job.transcript ?? []),
+    [job.transcript]
+  );
 
   const activeCueIndex = useMemo(() => {
     return segments.findIndex((seg) => {
@@ -48,12 +44,11 @@ export function SubtitlesTab({ job, currentTime, onSeek }: SubtitlesTabProps) {
   }, [segments, currentTime, offsetSec]);
 
   const activeCue = activeCueIndex >= 0 ? segments[activeCueIndex] : null;
-  const activeSpeaker = activeCue ? speakerMap.get(activeCue.speakerId) : undefined;
 
   const formattedText = useMemo(() => {
-    const opts = { includeSpeakers, offsetSec };
+    const opts = { includeSpeakers: false, offsetSec };
     return format === 'srt' ? buildSrt(job, opts) : buildVtt(job, opts);
-  }, [format, includeSpeakers, offsetSec, job]);
+  }, [format, offsetSec, job]);
 
   const handleCopy = async () => {
     if (!formattedText.trim()) return;
@@ -69,7 +64,7 @@ export function SubtitlesTab({ job, currentTime, onSeek }: SubtitlesTabProps) {
 
   const handleDownload = async () => {
     try {
-      await exportJob(job.id, format, { includeSpeakers, offsetSec });
+      await exportJob(job.id, format, { includeSpeakers: false, offsetSec });
       showToast(`Downloaded ${format.toUpperCase()} subtitles.`, 'success');
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Subtitle download failed', 'error');
@@ -104,11 +99,6 @@ export function SubtitlesTab({ job, currentTime, onSeek }: SubtitlesTabProps) {
         <div className="flex min-h-[68px] items-center justify-center rounded-lg bg-zinc-900/90 px-4 py-3">
           {activeCue ? (
             <p className="max-w-md rounded bg-black/75 px-3 py-1.5 text-xs leading-relaxed font-medium text-white shadow-sm sm:text-[13px]">
-              {includeSpeakers && activeSpeaker && (
-                <span className="mr-1.5 font-semibold" style={{ color: activeSpeaker.color }}>
-                  {activeSpeaker.name}:
-                </span>
-              )}
               <span>{activeCue.text}</span>
             </p>
           ) : (
@@ -144,22 +134,6 @@ export function SubtitlesTab({ job, currentTime, onSeek }: SubtitlesTabProps) {
               </button>
             ))}
           </div>
-
-          {/* Speaker Prefix Toggle */}
-          <button
-            type="button"
-            onClick={() => setIncludeSpeakers((v) => !v)}
-            aria-pressed={includeSpeakers}
-            title="Include speaker name prefix inside subtitle cues"
-            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-colors ${
-              includeSpeakers
-                ? 'border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-900/70 dark:bg-indigo-950/50 dark:text-indigo-300'
-                : 'border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400'
-            }`}
-          >
-            <UserCheck className="h-3 w-3" aria-hidden="true" />
-            <span>Speakers</span>
-          </button>
 
           {/* Timing Offset Nudge */}
           <div
@@ -231,7 +205,6 @@ export function SubtitlesTab({ job, currentTime, onSeek }: SubtitlesTabProps) {
               format === 'vtt'
                 ? formatSrtTime(end).replace(',', '.')
                 : formatSrtTime(end);
-            const spk = speakerMap.get(seg.speakerId);
             const isActive = idx === activeCueIndex;
 
             return (
@@ -252,11 +225,6 @@ export function SubtitlesTab({ job, currentTime, onSeek }: SubtitlesTabProps) {
                     </span>
                   </div>
                   <p className="mt-1 text-xs leading-relaxed text-zinc-800 dark:text-zinc-200">
-                    {includeSpeakers && spk && (
-                      <span className="mr-1.5 font-semibold" style={{ color: spk.color }}>
-                        {spk.name}:
-                      </span>
-                    )}
                     {seg.text}
                   </p>
                 </button>

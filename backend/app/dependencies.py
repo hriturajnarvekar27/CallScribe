@@ -1,0 +1,21 @@
+from __future__ import annotations
+
+from typing import Generator
+
+from fastapi import Request
+from sqlalchemy.orm import Session
+
+from app.config import Settings
+
+
+def get_app_settings(request: Request) -> Settings:
+    return request.app.state.settings
+
+
+def get_db(request: Request) -> Generator[Session, None, None]:
+    session_factory = request.app.state.session_factory
+    db = session_factory()
+    try:
+        yield db
+    finally:
+        db.close()

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { FileAudio, FileVideo, Trash2, UploadCloud, X } from 'lucide-react';
-import { AppSettings, OutputSelections, UploadJobPayload } from '../types';
+import { AppSettings, OutputSelections, TranscriptViewMode, UploadJobPayload } from '../types';
 import {
   ACCEPTED_MEDIA_EXTENSIONS,
   formatFileSize,
@@ -35,8 +35,10 @@ export function NewTranscriptionModal({
   const [files, setFiles] = useState<File[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const [title, setTitle] = useState('');
+  const [transcriptMode, setTranscriptMode] = useState<TranscriptViewMode>(
+    settings.defaultTranscriptMode
+  );
   const [language, setLanguage] = useState(settings.defaultLanguage);
-  const [speakers, setSpeakers] = useState('auto');
   const [outputs, setOutputs] = useState<OutputSelections>(settings.defaultOutputs);
   const [context, setContext] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
@@ -59,8 +61,8 @@ export function NewTranscriptionModal({
 
     setFiles(deduped);
     setTitle(deduped.length === 1 ? stripFileExtension(deduped[0].name) : '');
+    setTranscriptMode(settings.defaultTranscriptMode);
     setLanguage(settings.defaultLanguage);
-    setSpeakers('auto');
     setOutputs({ ...settings.defaultOutputs });
     setContext('');
     setFormError(
@@ -161,7 +163,7 @@ export function NewTranscriptionModal({
             ? `${title.trim()} (${idx + 1})`
             : stripFileExtension(f.name),
       language,
-      speakers,
+      speakers: '1',
       outputs,
       context: context.trim(),
     }));
@@ -316,50 +318,74 @@ export function NewTranscriptionModal({
             />
           </div>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
-              <label
-                htmlFor="job-language-select"
-                className="mb-1.5 block text-xs font-medium text-zinc-700 dark:text-zinc-300"
-              >
-                Spoken language
-              </label>
-              <select
-                id="job-language-select"
-                value={language}
-                onChange={(e) => setLanguage(e.target.value)}
-                className="w-full rounded-xl border border-zinc-200 bg-white px-3.5 py-2 text-sm text-zinc-900 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
-              >
-                <option value="auto">Auto-detect</option>
-                <option value="en">English</option>
-                <option value="hi">Hindi (हिन्दी)</option>
-                <option value="mr">Marathi (मराठी)</option>
-                <option value="es">Spanish</option>
-                <option value="fr">French</option>
-                <option value="de">German</option>
-                <option value="ja">Japanese</option>
-              </select>
+          <div>
+            <span className="mb-1.5 block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+              Transcript layout
+            </span>
+            <div
+              role="group"
+              aria-label="Transcript layout"
+              className="grid grid-cols-2 gap-1.5 rounded-xl border border-zinc-200 bg-zinc-50 p-1 dark:border-zinc-800 dark:bg-zinc-950"
+            >
+              {(
+                [
+                  {
+                    value: 'transcript',
+                    label: 'Transcript',
+                    hint: 'Clean, continuous readable conversation',
+                  },
+                  {
+                    value: 'timestamped',
+                    label: 'Timestamped',
+                    hint: 'Meaningful segments with timecodes',
+                  },
+                ] as const
+              ).map((mode) => {
+                const active = transcriptMode === mode.value;
+                return (
+                  <button
+                    key={mode.value}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => setTranscriptMode(mode.value)}
+                    className={`rounded-lg px-3 py-2 text-left transition-colors focus-visible:outline-2 focus-visible:outline-indigo-600 ${
+                      active
+                        ? 'bg-white text-zinc-900 shadow-xs ring-1 ring-zinc-200 dark:bg-zinc-800 dark:text-zinc-50 dark:ring-zinc-700'
+                        : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200'
+                    }`}
+                  >
+                    <span className="block text-xs font-semibold">{mode.label}</span>
+                    <span className="mt-0.5 block text-[10px] leading-tight text-zinc-500 dark:text-zinc-400">
+                      {mode.hint}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
+          </div>
 
-            <div>
-              <label
-                htmlFor="job-speakers-select"
-                className="mb-1.5 block text-xs font-medium text-zinc-700 dark:text-zinc-300"
-              >
-                Number of speakers
-              </label>
-              <select
-                id="job-speakers-select"
-                value={speakers}
-                onChange={(e) => setSpeakers(e.target.value)}
-                className="w-full rounded-xl border border-zinc-200 bg-white px-3.5 py-2 text-sm text-zinc-900 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
-              >
-                <option value="auto">Auto-detect</option>
-                <option value="2">2 speakers</option>
-                <option value="3">3 speakers</option>
-                <option value="4+">4+ speakers</option>
-              </select>
-            </div>
+          <div>
+            <label
+              htmlFor="job-language-select"
+              className="mb-1.5 block text-xs font-medium text-zinc-700 dark:text-zinc-300"
+            >
+              Spoken language
+            </label>
+            <select
+              id="job-language-select"
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+              className="w-full rounded-xl border border-zinc-200 bg-white px-3.5 py-2 text-sm text-zinc-900 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
+            >
+              <option value="auto">Auto-detect</option>
+              <option value="en">English</option>
+              <option value="hi">Hindi (हिन्दी)</option>
+              <option value="mr">Marathi (मराठी)</option>
+              <option value="es">Spanish</option>
+              <option value="fr">French</option>
+              <option value="de">German</option>
+              <option value="ja">Japanese</option>
+            </select>
           </div>
 
           <div>
@@ -403,7 +429,7 @@ export function NewTranscriptionModal({
               rows={2}
               value={context}
               onChange={(e) => setContext(e.target.value)}
-              placeholder="Client name, project background, speaker roles, or domain glossary terms..."
+              placeholder="Client name, project background, or domain glossary terms..."
               className="w-full rounded-xl border border-zinc-200 bg-white px-3.5 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:placeholder:text-zinc-500"
             />
           </div>

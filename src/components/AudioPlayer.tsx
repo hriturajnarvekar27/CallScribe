@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Bookmark as BookmarkIcon,
   Captions,
   Pause,
   Play,
@@ -8,7 +9,7 @@ import {
   Volume2,
   VolumeX,
 } from 'lucide-react';
-import { Speaker, TranscriptSegment } from '../types';
+import { Bookmark, BookmarkCategory, Speaker, TranscriptSegment } from '../types';
 import { formatDuration } from '../utils/format';
 
 interface AudioPlayerProps {
@@ -16,24 +17,40 @@ interface AudioPlayerProps {
   durationSec: number;
   speakers: Speaker[];
   transcript: TranscriptSegment[];
+  bookmarks?: Bookmark[];
+  replayRange?: { start: number; end: number } | null;
   currentTime: number;
   isPlaying: boolean;
   onTimeChange: (time: number) => void;
   onPlayStateChange: (playing: boolean) => void;
+  onAddBookmarkAtTime?: (timeSec: number) => void;
+  onReplayEnded?: () => void;
 }
 
 const SPEEDS = [0.75, 1, 1.25, 1.5, 2] as const;
 const BAR_COUNT = 96;
+
+const BOOKMARK_COLORS: Record<BookmarkCategory, string> = {
+  important: '#F59E0B',
+  question: '#06B6D4',
+  decision: '#10B981',
+  'follow-up': '#8B5CF6',
+  note: '#6366F1',
+};
 
 export function AudioPlayer({
   audioUrl,
   durationSec,
   speakers,
   transcript,
+  bookmarks = [],
+  replayRange = null,
   currentTime,
   isPlaying,
   onTimeChange,
   onPlayStateChange,
+  onAddBookmarkAtTime,
+  onReplayEnded,
 }: AudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
@@ -44,43 +61,26 @@ export function AudioPlayer({
 
   const safeDuration = Math.max(1, durationSec);
 
-  const speakerMap = useMemo(() => {
-    const map = new Map<string, Speaker>();
-    for (const s of speakers) {
-      map.set(s.id, s);
-    }
-    return map;
-  }, [speakers]);
-
-  // Precompute speaker-colored waveform bars across timeline
+  // Precompute clean waveform bars across timeline
   const waveformBars = useMemo(() => {
-    const bars: { time: number; heightPct: number; color: string; speakerName?: string }[] = [];
+    const bars: { time: number; heightPct: number; hasSpeech: boolean }[] = [];
     for (let i = 0; i < BAR_COUNT; i++) {
       const t = ((i + 0.5) / BAR_COUNT) * safeDuration;
       const seg = transcript.find((s) => t >= s.start && t <= s.end);
-      const speaker = seg ? speakerMap.get(seg.speakerId) : undefined;
       const seed = Math.abs(Math.sin(i * 12.9898 + (seg ? seg.text.length : 7)) * 43758.5453) % 1;
       const heightPct = seg ? Math.round(32 + seed * 64) : Math.round(18 + seed * 22);
       bars.push({
         time: t,
         heightPct,
-        color: speaker?.color ?? '#a1a1aa',
-        speakerName: speaker?.name,
+        hasSpeech: Boolean(seg),
       });
     }
     return bars;
-  }, [safeDuration, transcript, speakerMap]);
-
-  const hoverSpeakerName = useMemo(() => {
-    if (hoverTime === null) return null;
-    const seg = transcript.find((s) => hoverTime >= s.start && hoverTime <= s.end);
-    return seg ? speakerMap.get(seg.speakerId)?.name ?? null : null;
-  }, [hoverTime, transcript, speakerMap]);
+  }, [safeDuration, transcript]);
 
   const activeSegment = useMemo(() => {
     return transcript.find((s) => currentTime >= s.start && currentTime <= s.end) ?? null;
   }, [currentTime, transcript]);
-  const activeSpeaker = activeSegment ? speakerMap.get(activeSegment.speakerId) : undefined;
 
   useEffect(() => {
     const el = audioRef.current;
@@ -103,10 +103,14 @@ export function AudioPlayer({
 
   const currentTimeRef = useRef(currentTime);
   currentTimeRef.current = currentTime;
+  const replayRangeRef = useRef(replayRange);
+  replayRangeRef.current = replayRange;
 
   useEffect(() => {
     if (!isPlaying) return;
     let last = performance.now();
+    let lastEmit = 0;
+    let lastEmittedTime = currentTimeRef.current;
     let rafId = 0;
 
     const tick = (now: number) => {
@@ -114,31 +118,48 @@ export function AudioPlayer({
       last = now;
 
       const el = audioRef.current;
+      let nextTime: number;
       if (
         el &&
         Number.isFinite(el.duration) &&
         el.duration >= safeDuration * 0.9 &&
         !el.paused
       ) {
-        onTimeChange(Math.min(safeDuration, el.currentTime));
-        if (el.ended) {
-          onPlayStateChange(false);
-          return;
-        }
+        nextTime = Math.min(safeDuration, el.currentTime);
       } else {
-        const nextTime = Math.min(safeDuration, currentTimeRef.current + deltaSec);
-        onTimeChange(nextTime);
-        if (nextTime >= safeDuration) {
-          onPlayStateChange(false);
-          return;
+        nextTime = Math.min(safeDuration, currentTimeRef.current + deltaSec);
+      }
+
+      currentTimeRef.current = nextTime;
+
+      const activeReplay = replayRangeRef.current;
+      if (activeReplay && nextTime >= activeReplay.end) {
+        onTimeChange(activeReplay.end);
+        if (el && !el.paused) {
+          el.pause();
         }
+        onPlayStateChange(false);
+        onReplayEnded?.();
+        return;
+      }
+
+      if (nextTime >= safeDuration || el?.ended) {
+        onTimeChange(safeDuration);
+        onPlayStateChange(false);
+        return;
+      }
+
+      if (now - lastEmit >= 65 || Math.abs(nextTime - lastEmittedTime) >= 0.08) {
+        lastEmit = now;
+        lastEmittedTime = nextTime;
+        onTimeChange(nextTime);
       }
       rafId = requestAnimationFrame(tick);
     };
 
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [isPlaying, speed, safeDuration, onTimeChange, onPlayStateChange]);
+  }, [isPlaying, speed, safeDuration, onTimeChange, onPlayStateChange, onReplayEnded]);
 
   const seekTo = (targetSec: number) => {
     const clamped = Math.max(0, Math.min(safeDuration, targetSec));
@@ -263,9 +284,29 @@ export function AudioPlayer({
                   className="flex-1 rounded-full transition-opacity duration-100"
                   style={{
                     height: `${bar.heightPct}%`,
-                    backgroundColor: bar.color,
-                    opacity: isNearHover ? 1 : passed ? 0.92 : 0.25,
+                    backgroundColor: bar.hasSpeech ? '#6366f1' : '#a1a1aa',
+                    opacity: isNearHover ? 1 : passed ? 0.92 : 0.28,
                   }}
+                />
+              );
+            })}
+
+            {/* Bookmark Markers */}
+            {bookmarks.map((bm) => {
+              const pct = Math.max(1, Math.min(99, (bm.timeSec / safeDuration) * 100));
+              const pinColor = BOOKMARK_COLORS[bm.category] ?? '#F59E0B';
+              return (
+                <button
+                  key={bm.id}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    seekTo(bm.timeSec);
+                  }}
+                  title={`[${formatDuration(bm.timeSec)}] ${bm.label}`}
+                  aria-label={`Jump to bookmark ${bm.label} at ${formatDuration(bm.timeSec)}`}
+                  className="absolute -top-1 z-10 h-2.5 w-2.5 -translate-x-1/2 rotate-45 rounded-[2px] border border-white/80 shadow-xs transition-transform hover:scale-125 dark:border-zinc-900"
+                  style={{ left: `${pct}%`, backgroundColor: pinColor }}
                 />
               );
             })}
@@ -276,7 +317,7 @@ export function AudioPlayer({
               style={{ left: `${progressPct}%` }}
             />
 
-            {/* Hover Timestamp + Speaker Tooltip */}
+            {/* Hover Timestamp Tooltip */}
             {hoverTime !== null && (
               <div
                 className="pointer-events-none absolute -top-8 flex -translate-x-1/2 items-center gap-1.5 rounded-md bg-zinc-900 px-2 py-1 text-[10px] font-medium text-white shadow-md whitespace-nowrap dark:bg-zinc-100 dark:text-zinc-900"
@@ -285,12 +326,6 @@ export function AudioPlayer({
                 }}
               >
                 <span className="font-mono tabular-nums">{formatDuration(hoverTime)}</span>
-                {hoverSpeakerName && (
-                  <>
-                    <span className="opacity-50" aria-hidden="true">·</span>
-                    <span className="max-w-[140px] truncate">{hoverSpeakerName}</span>
-                  </>
-                )}
               </div>
             )}
           </div>
@@ -300,8 +335,21 @@ export function AudioPlayer({
           </span>
         </div>
 
-        {/* Captions, Speed & Mute Controls */}
+        {/* Bookmarks, Captions, Speed & Mute Controls */}
         <div className="flex items-center justify-end gap-1.5 shrink-0">
+          {onAddBookmarkAtTime && (
+            <button
+              type="button"
+              onClick={() => onAddBookmarkAtTime(currentTime)}
+              title={`Bookmark ${formatDuration(currentTime)}`}
+              aria-label={`Add bookmark at ${formatDuration(currentTime)}`}
+              className="flex h-8 items-center gap-1 whitespace-nowrap rounded-lg border border-zinc-200 bg-zinc-50 px-2 text-[11px] font-semibold text-zinc-700 transition-colors hover:border-amber-300 hover:bg-amber-50 hover:text-amber-700 focus-visible:outline-2 focus-visible:outline-indigo-600 dark:border-zinc-800 dark:bg-zinc-800/70 dark:text-zinc-200 dark:hover:border-amber-500/50 dark:hover:bg-amber-950/30 dark:hover:text-amber-300"
+            >
+              <BookmarkIcon className="h-3.5 w-3.5 text-amber-500" aria-hidden="true" />
+              <span className="hidden md:inline">Bookmark</span>
+            </button>
+          )}
+
           {transcript.length > 0 && (
             <button
               type="button"
@@ -347,14 +395,6 @@ export function AudioPlayer({
       {/* Live Synced Caption Strip */}
       {showCaptions && activeSegment && (
         <div className="mt-2 flex items-baseline gap-2 border-t border-zinc-100 pt-2 text-xs dark:border-zinc-800/80">
-          {activeSpeaker && (
-            <span
-              className="shrink-0 font-semibold"
-              style={{ color: activeSpeaker.color }}
-            >
-              {activeSpeaker.name}:
-            </span>
-          )}
           <p className="line-clamp-1 flex-1 text-zinc-700 dark:text-zinc-300">
             {activeSegment.text}
           </p>

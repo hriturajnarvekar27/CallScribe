@@ -27,6 +27,7 @@ import {
 import {
   ApiError,
   deleteJob,
+  downloadJobAudio,
   exportJob,
   listJobs,
   patchJob,
@@ -48,7 +49,6 @@ import {
 import { ContextMenu } from './ContextMenu';
 import { EmptyStateIllustration } from './EmptyStateIllustration';
 import { Sparkline } from './Sparkline';
-import { SpeakerAvatarStack } from './SpeakerAvatarStack';
 import { StatusIndicator } from './StatusIndicator';
 import { useToast } from './ToastProvider';
 import { WaveformThumbnail } from './WaveformThumbnail';
@@ -88,7 +88,6 @@ export function LibraryView({
   const [search, setSearch] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<FilterStatus>('all');
   const [languageFilter, setLanguageFilter] = useState<string>('all');
-  const [speakerCountFilter, setSpeakerCountFilter] = useState<string>('all');
   const [dateFilter, setDateFilter] = useState<DateRangeFilter>('all');
   const [tagFilter, setTagFilter] = useState<string>('all');
   const [sort, setSort] = useState<SortOption>('newest');
@@ -273,12 +272,6 @@ export function LibraryView({
         if (languageFilter !== 'all' && job.language !== languageFilter) {
           return false;
         }
-        if (speakerCountFilter !== 'all') {
-          const count = job.speakers.length;
-          if (speakerCountFilter === '2' && count !== 2) return false;
-          if (speakerCountFilter === '3' && count !== 3) return false;
-          if (speakerCountFilter === '4+' && count < 4) return false;
-        }
         if (dateFilter !== 'all') {
           const age = nowMs - new Date(job.createdAt).getTime();
           if (dateFilter === 'today' && age > 86400 * 1000) return false;
@@ -312,7 +305,6 @@ export function LibraryView({
     jobs,
     statusFilter,
     languageFilter,
-    speakerCountFilter,
     dateFilter,
     tagFilter,
     search,
@@ -373,13 +365,6 @@ export function LibraryView({
         onClear: () => setLanguageFilter('all'),
       });
     }
-    if (speakerCountFilter !== 'all') {
-      chips.push({
-        key: 'speakers',
-        label: `Speakers: ${speakerCountFilter}`,
-        onClear: () => setSpeakerCountFilter('all'),
-      });
-    }
     if (dateFilter !== 'all') {
       chips.push({
         key: 'date',
@@ -405,7 +390,6 @@ export function LibraryView({
   }, [
     statusFilter,
     languageFilter,
-    speakerCountFilter,
     dateFilter,
     tagFilter,
     search,
@@ -414,7 +398,6 @@ export function LibraryView({
   const clearAllFilters = () => {
     setStatusFilter('all');
     setLanguageFilter('all');
-    setSpeakerCountFilter('all');
     setDateFilter('all');
     setTagFilter('all');
     setSearch('');
@@ -469,6 +452,15 @@ export function LibraryView({
       showToast(`Exported ${format.toUpperCase()} for "${job.title}".`, 'success');
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Export failed', 'error');
+    }
+  };
+
+  const handleDownloadAudio = async (job: Job) => {
+    try {
+      const { actualFormat } = await downloadJobAudio(job.id, 'mp3');
+      showToast(`Downloaded audio (.${actualFormat}) for "${job.title}".`, 'success');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Audio extraction failed', 'error');
     }
   };
 
@@ -591,6 +583,9 @@ export function LibraryView({
   ];
 
   const renderEtaLabel = (job: Job) => {
+    if (job.progress <= 0) {
+      return job.stageMessage || 'Starting...';
+    }
     const remainingSec = Math.max(2, Math.round(((100 - job.progress) / 100) * 24));
     return `~${remainingSec}s ETA`;
   };
@@ -836,8 +831,6 @@ export function LibraryView({
             </button>
           </div>
 
-          <SpeakerAvatarStack speakers={job.speakers} maxVisible={3} />
-
           <div className="flex flex-col items-end">
             <StatusIndicator
               status={job.status}
@@ -960,7 +953,6 @@ export function LibraryView({
         {/* Footer */}
         <div className="mt-4 flex items-center justify-between gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
           <div className="flex items-center gap-2">
-            <SpeakerAvatarStack speakers={job.speakers} maxVisible={3} />
             <span className="font-mono text-[11px] tabular-nums text-zinc-400">
               {formatDuration(job.durationSec)}
             </span>
@@ -1195,18 +1187,6 @@ export function LibraryView({
         </select>
 
         <select
-          value={speakerCountFilter}
-          onChange={(e) => setSpeakerCountFilter(e.target.value)}
-          aria-label="Filter by speaker count"
-          className="cs-surface rounded-lg border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-700 focus:border-indigo-500 focus:outline-none dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
-        >
-          <option value="all">Speakers: Any</option>
-          <option value="2">2 speakers</option>
-          <option value="3">3 speakers</option>
-          <option value="4+">4+ speakers</option>
-        </select>
-
-        <select
           value={dateFilter}
           onChange={(e) => setDateFilter(e.target.value as DateRangeFilter)}
           aria-label="Filter by date range"
@@ -1404,7 +1384,7 @@ export function LibraryView({
               <ol className="mx-auto mt-5 max-w-md space-y-2 text-left">
                 {[
                   { step: '1', text: 'Upload or drag-and-drop an audio or video recording' },
-                  { step: '2', text: 'Review speaker-labeled transcript & rename participants' },
+                  { step: '2', text: 'Review clean, timestamped transcripts & edit wording inline' },
                   { step: '3', text: 'Export SRT/WebVTT subtitles, Word, PDF, or Markdown notes' },
                 ].map((item) => (
                   <li
@@ -1523,6 +1503,7 @@ export function LibraryView({
         }}
         onTogglePin={(job) => void handleTogglePin(job)}
         onExportMd={(job) => void handleExportSingle(job, 'md')}
+        onDownloadAudio={(job) => void handleDownloadAudio(job)}
         onReprocess={(job) => void handleRetryOrReprocess(job)}
         onDelete={(job) => void handleDeleteSingle(job)}
       />

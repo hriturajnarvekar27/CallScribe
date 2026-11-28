@@ -2,7 +2,6 @@ import {
   Job,
   NotificationItem,
   TranscriptSegment,
-  WorkspaceOption,
 } from './types';
 import { getMockAudioUrl } from './utils/mockAudio';
 
@@ -446,6 +445,62 @@ const veltrixTranscript: TranscriptSegment[] = [
   },
 ];
 
+const kestrelUnlabeledTranscript: TranscriptSegment[] = [
+  {
+    id: 'seg-k-01',
+    start: 0,
+    end: 26,
+    speakerId: 'spk-1',
+    text: "Welcome everyone to our Q4 release readiness sync. I'm Elena, leading product engineering, and I'd love to start with Marcus on mobile playback performance before Priya walks us through the subtitle export QA.",
+  },
+  {
+    id: 'seg-k-02',
+    start: 27,
+    end: 62,
+    speakerId: 'spk-1',
+    text: "Thanks, Elena. On iOS and Android Safari, streaming seek latency dropped from 950 milliseconds to under 180 milliseconds after switching to 256-kilobyte range chunks. The only open item is background tab audio resume on Chrome Android.",
+  },
+  {
+    id: 'seg-k-03',
+    start: 63,
+    end: 88,
+    speakerId: 'spk-1',
+    text: "Good catch, Marcus. Priya, how did the SRT and VTT timing offset checks look across your long-form webinar test videos?",
+  },
+  {
+    id: 'seg-k-04',
+    start: 89,
+    end: 130,
+    speakerId: 'spk-1',
+    text: "Thanks both! I ran 45-minute MP4 and WebM recordings through the subtitle previewer. Shifting timestamps by half a second stayed frame-accurate in both SRT and VTT exports, though we noticed consecutive turns from the same speaker sometimes split mid-sentence.",
+    confidence: 0.44,
+    uncertain: true,
+  },
+  {
+    id: 'seg-k-05',
+    start: 131,
+    end: 164,
+    speakerId: 'spk-1',
+    text: "That's super helpful feedback, Priya. Let's make sure users can merge consecutive same-speaker segments in one click before exporting subtitles. Marcus, will the Chrome Android resume patch be ready by Thursday?",
+  },
+  {
+    id: 'seg-k-06',
+    start: 165,
+    end: 194,
+    speakerId: 'spk-1',
+    text: "Yes, Elena—I already have a draft PR testing visibilitychange re-sync and will merge it tomorrow morning once QA signs off.",
+    confidence: 0.48,
+    uncertain: true,
+  },
+  {
+    id: 'seg-k-07',
+    start: 195,
+    end: 224,
+    speakerId: 'spk-1',
+    text: "Perfect. I'll re-run the mobile verification suite right after Marcus merges and post the final checklist in Slack before Friday's release cut.",
+  },
+];
+
 const aureliaTranscript: TranscriptSegment[] = [
   {
     id: 'seg-a-01',
@@ -552,7 +607,44 @@ export function createInitialMockJobs(): Job[] {
           'Finalize SOW countersignature and kickoff deposit invoice.',
           'Run 20-minute dispatcher workflow shadowing next Tuesday.',
         ],
+        questionsRaised: [
+          'Will IT approve a persistent NetSuite integration sandbox before February UAT?',
+        ],
       },
+      bookmarks: [
+        {
+          id: 'bm-m-1',
+          timeSec: 313,
+          category: 'decision',
+          label: 'Milestone schedule agreed (20/30/30/20)',
+          note: 'CFO approved fixed-scope Option A with net-15 terms.',
+        },
+        {
+          id: 'bm-m-2',
+          timeSec: 625,
+          category: 'important',
+          label: 'NetSuite Sunday sandbox reset risk',
+          note: 'Mitigated with CI OAuth bootstrap script.',
+        },
+      ],
+      actionItems: [
+        {
+          id: 'act-m-1',
+          task: 'Send CSV export of 1,400 active commodity codes',
+          owner: 'Arjun Nair',
+          deadline: 'Today',
+          timestampSec: 255,
+          completed: true,
+        },
+        {
+          id: 'act-m-2',
+          task: 'Define Sev-1 criteria in the SOW before final countersignature',
+          owner: 'Maya Lin',
+          deadline: 'This week',
+          timestampSec: 446,
+          completed: false,
+        },
+      ],
     },
     {
       id: 'job-kestrel-roadmap',
@@ -840,6 +932,68 @@ export function createInitialMockJobs(): Job[] {
         nextSteps: ['Schedule SLA review call.'],
       },
     },
+    {
+      id: 'job-kestrel-sync',
+      title: 'Q4 Release Readiness Sync — Kestrel Video',
+      client: 'Kestrel Video',
+      tags: ['release', 'qa'],
+      pinned: false,
+      createdAt: hoursAgo(8),
+      durationSec: 224,
+      language: 'en',
+      status: 'done',
+      progress: 100,
+      audioUrl,
+      speakers: [
+        { id: 'spk-1', name: 'Speaker 1', color: '#6366F1' },
+      ],
+      transcript: kestrelUnlabeledTranscript,
+      summary:
+        'Engineering, mobile playback, and QA leads reviewed Q4 release readiness covering range-request audio streaming, SRT/VTT subtitle sync, and Friday release cut blockers.',
+      keyPoints: [
+        'Mobile playback seek latency improved from 950ms to <180ms with 256KB range chunks.',
+        'Subtitle SRT/VTT timing offset verified across 45-minute MP4 and WebM videos.',
+        'Chrome Android background resume fix targeted for Thursday merge.',
+      ],
+      notes: [
+        {
+          heading: 'Release Readiness & QA',
+          bullets: [
+            'Marcus to merge Chrome Android visibilitychange audio resume patch.',
+            'Priya to re-run mobile QA checklist after Thursday merge.',
+            'Elena requested one-click consecutive turn merging before subtitle export.',
+          ],
+        },
+      ],
+      analysis: {
+        sentiment: 'positive',
+        sentimentNote: 'Focused engineering alignment with clear release ownership.',
+        topics: ['Audio Streaming', 'Subtitle Sync', 'Mobile QA', 'Release Cut'],
+        decisions: ['Merge Chrome Android resume fix Thursday ahead of Friday release.'],
+        concerns: ['Consecutive same-speaker ASR splits affecting subtitle readability.'],
+        risks: ['Delayed QA regression pass if mobile fix slips past Thursday.'],
+        nextSteps: ['Merge playback fix', 'Run mobile verification suite'],
+        questionsRaised: ['Will the Chrome Android resume patch land before Thursday QA?'],
+      },
+      bookmarks: [
+        {
+          id: 'bm-k-1',
+          timeSec: 131,
+          category: 'follow-up',
+          label: 'One-click consecutive turn merge requirement',
+        },
+      ],
+      actionItems: [
+        {
+          id: 'act-k-1',
+          task: 'Merge Chrome Android visibilitychange audio resume patch',
+          owner: 'Marcus',
+          deadline: 'Thursday morning',
+          timestampSec: 165,
+          completed: false,
+        },
+      ],
+    },
   ];
 }
 
@@ -874,27 +1028,3 @@ export function createInitialNotifications(): NotificationItem[] {
     },
   ];
 }
-
-export const INITIAL_WORKSPACES: WorkspaceOption[] = [
-  {
-    id: 'ws-acme',
-    name: 'Acme Advisory',
-    plan: 'Pro Workspace',
-    hoursUsed: 14.2,
-    hoursLimit: 30,
-  },
-  {
-    id: 'ws-meridian',
-    name: 'Meridian Delivery Pod',
-    plan: 'Enterprise',
-    hoursUsed: 41.8,
-    hoursLimit: 100,
-  },
-  {
-    id: 'ws-personal',
-    name: 'Personal Sandbox',
-    plan: 'Starter',
-    hoursUsed: 2.4,
-    hoursLimit: 5,
-  },
-];

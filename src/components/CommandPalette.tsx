@@ -4,16 +4,17 @@ import {
   CornerDownLeft,
   FileText,
   FolderKanban,
-  Keyboard,
   LayoutDashboard,
+  Loader2,
   Palette,
   Plus,
   Search,
   Settings,
   Sparkles,
+  User,
 } from 'lucide-react';
-import { ApiError, listFullJobsForWorkspace } from '../api';
-import { AppRoute, Job } from '../types';
+import { ApiError, listFullJobsForWorkspace, searchTranscripts } from '../api';
+import { AppRoute, Job, TranscriptSearchHit } from '../types';
 import { formatTimestamp } from '../utils/format';
 
 interface CommandPaletteProps {
@@ -23,7 +24,6 @@ interface CommandPaletteProps {
   onNewTranscription: () => void;
   onCycleTheme: () => void;
   onCycleBackground: () => void;
-  onOpenShortcuts: () => void;
 }
 
 interface PaletteResult {
@@ -62,17 +62,19 @@ export function CommandPalette({
   onNewTranscription,
   onCycleTheme,
   onCycleBackground,
-  onOpenShortcuts,
 }: CommandPaletteProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState('');
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [remoteHits, setRemoteHits] = useState<TranscriptSearchHit[]>([]);
+  const [searchingTranscripts, setSearchingTranscripts] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
 
   useEffect(() => {
     if (!open) return;
     setQuery('');
+    setRemoteHits([]);
     setActiveIndex(0);
     setLoadError(null);
     const controller = new AbortController();
@@ -89,6 +91,39 @@ export function CommandPalette({
       window.clearTimeout(focusTimer);
     };
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const trimmed = query.trim();
+    if (trimmed.length < 2) {
+      setRemoteHits([]);
+      setSearchingTranscripts(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setSearchingTranscripts(true);
+    const timer = window.setTimeout(() => {
+      void searchTranscripts(trimmed, controller.signal)
+        .then((hits) => {
+          setRemoteHits(hits);
+        })
+        .catch((err) => {
+          if (err instanceof ApiError && err.isAborted) return;
+          setRemoteHits([]);
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) {
+            setSearchingTranscripts(false);
+          }
+        });
+    }, 180);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [open, query]);
 
   const results = useMemo<PaletteResult[]>(() => {
     const q = query.trim().toLowerCase();
@@ -110,7 +145,7 @@ export function CommandPalette({
         id: 'cmd-theme',
         group: 'Commands',
         title: 'Switch / Cycle theme',
-        subtitle: 'Dark Slate, AMOLED Neon Cyan/Violet/Emerald, Light',
+        subtitle: 'Studio, Warm Paper, Nordic Mist, Midnight, Evergreen, Obsidian, AMOLED Neon',
         icon: Palette,
         onSelect: () => {
           onCycleTheme();
@@ -120,7 +155,7 @@ export function CommandPalette({
         id: 'cmd-bg',
         group: 'Commands',
         title: 'Switch / Cycle live background',
-        subtitle: 'Aurora Mesh, Acoustic Waves, Neural Drift, Studio Grid, Static',
+        subtitle: 'Aurora, Waves, Neural Drift, Starlight, Rain, Fireflies, Contour, Companions, Custom',
         icon: Sparkles,
         onSelect: () => {
           onCycleBackground();
@@ -147,6 +182,17 @@ export function CommandPalette({
         },
       },
       {
+        id: 'cmd-profile',
+        group: 'Commands',
+        title: 'Go to Profile',
+        subtitle: 'Edit display name, avatar photo, role, and workspace summary',
+        icon: User,
+        onSelect: () => {
+          onNavigate({ view: 'profile' });
+          onClose();
+        },
+      },
+      {
         id: 'cmd-settings',
         group: 'Commands',
         title: 'Go to Settings',
@@ -154,16 +200,6 @@ export function CommandPalette({
         onSelect: () => {
           onNavigate({ view: 'settings' });
           onClose();
-        },
-      },
-      {
-        id: 'cmd-shortcuts',
-        group: 'Commands',
-        title: 'View keyboard shortcuts',
-        icon: Keyboard,
-        onSelect: () => {
-          onClose();
-          onOpenShortcuts();
         },
       },
     ];
@@ -198,34 +234,56 @@ export function CommandPalette({
 
     // Transcript snippets (when query >= 2 chars)
     if (q.length >= 2) {
-      let matchCount = 0;
-      for (const job of jobs) {
-        if (!job.transcript?.length) continue;
-        for (const seg of job.transcript) {
-          if (seg.text.toLowerCase().includes(q)) {
-            items.push({
-              id: `seg-${job.id}-${seg.id}`,
-              group: 'Transcript matches',
-              title: seg.text,
-              subtitle: job.title,
-              timestamp: formatTimestamp(seg.start),
-              highlightQuery: query,
-              icon: FileText,
-              onSelect: () => {
-                onNavigate({ view: 'job', jobId: job.id, seekTo: seg.start });
-                onClose();
-              },
-            });
-            matchCount++;
-            if (matchCount >= 6) break;
+      const seenKeys = new Set<string>();
+      const pushHit = (hit: TranscriptSearchHit) => {
+        const key = `${hit.jobId}:${hit.segmentId}`;
+        if (seenKeys.has(key)) return;
+        seenKeys.add(key);
+        items.push({
+          id: `seg-${hit.jobId}-${hit.segmentId}`,
+          group: 'Transcript matches',
+          title: hit.text,
+          subtitle: hit.jobTitle,
+          timestamp: formatTimestamp(hit.start),
+          highlightQuery: query,
+          icon: FileText,
+          onSelect: () => {
+            onNavigate({ view: 'job', jobId: hit.jobId, seekTo: hit.start });
+            onClose();
+          },
+        });
+      };
+
+      for (const hit of remoteHits.slice(0, 10)) {
+        pushHit(hit);
+      }
+
+      if (seenKeys.size < 8) {
+        for (const job of jobs) {
+          if (!job.transcript?.length) continue;
+          const spkMap = new Map(job.speakers.map((s) => [s.id, s.name]));
+          for (const seg of job.transcript) {
+            if (seg.text.toLowerCase().includes(q)) {
+              pushHit({
+                jobId: job.id,
+                jobTitle: job.title,
+                segmentId: seg.id,
+                speakerId: seg.speakerId,
+                speakerName: spkMap.get(seg.speakerId) ?? seg.speakerId,
+                start: seg.start,
+                end: seg.end,
+                text: seg.text,
+              });
+              if (seenKeys.size >= 10) break;
+            }
           }
+          if (seenKeys.size >= 10) break;
         }
-        if (matchCount >= 6) break;
       }
     }
 
     return items;
-  }, [query, jobs, onClose, onNewTranscription, onCycleTheme, onCycleBackground, onNavigate, onOpenShortcuts]);
+  }, [query, jobs, remoteHits, onClose, onNewTranscription, onCycleTheme, onCycleBackground, onNavigate]);
 
   useEffect(() => {
     setActiveIndex(0);
@@ -280,7 +338,11 @@ export function CommandPalette({
       <div className="cs-surface cs-neon-ring relative z-10 w-full max-w-2xl overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-900">
         {/* Search Input */}
         <div className="flex items-center gap-3 border-b border-zinc-200/80 px-4 py-3 dark:border-zinc-800">
-          <Search className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden="true" />
+          {searchingTranscripts ? (
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin text-indigo-500" aria-hidden="true" />
+          ) : (
+            <Search className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden="true" />
+          )}
           <input
             ref={inputRef}
             type="text"

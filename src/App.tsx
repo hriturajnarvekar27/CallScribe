@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AudioWaveform, Keyboard, Menu, Plus, Search } from 'lucide-react';
+import { AudioWaveform, Menu, Plus, Search } from 'lucide-react';
 import {
   ApiError,
   createJob,
@@ -16,13 +16,14 @@ import { LibraryView } from './components/LibraryView';
 import { LiveBackground } from './components/LiveBackground';
 import { NewTranscriptionModal } from './components/NewTranscriptionModal';
 import { NotificationsMenu } from './components/NotificationsMenu';
+import { ProfileView } from './components/ProfileView';
 import { SettingsView } from './components/SettingsView';
-import { ShortcutsModal } from './components/ShortcutsModal';
 import { Sidebar } from './components/Sidebar';
 import { ToastProvider, useToast } from './components/ToastProvider';
 import { UploadTray } from './components/UploadTray';
+import { getProfileInitials, useProfile } from './hooks/useProfile';
 import { useSettings } from './hooks/useSettings';
-import { createInitialNotifications, INITIAL_WORKSPACES } from './mockData';
+import { createInitialNotifications } from './mockData';
 import {
   AppRoute,
   Job,
@@ -40,6 +41,7 @@ function parseHashRoute(): AppRoute {
     if (jobId) return { view: 'job', jobId };
   }
   if (hash === '/library') return { view: 'library' };
+  if (hash === '/profile') return { view: 'profile' };
   if (hash === '/settings') return { view: 'settings' };
   return { view: 'dashboard' };
 }
@@ -50,6 +52,8 @@ function serializeHashRoute(route: AppRoute): string {
       return `#/jobs/${encodeURIComponent(route.jobId)}`;
     case 'library':
       return '#/library';
+    case 'profile':
+      return '#/profile';
     case 'settings':
       return '#/settings';
     default:
@@ -70,6 +74,7 @@ function isEditableElement(target: EventTarget | null): boolean {
 
 function AppShell() {
   const { settings, updateSettings, cycleTheme, cycleBackground } = useSettings();
+  const { profile, updateProfile, resetProfile } = useProfile();
   const { showToast } = useToast();
 
   const [route, setRoute] = useState<AppRoute>(() => parseHashRoute());
@@ -88,16 +93,10 @@ function AppShell() {
   });
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // Active Workspace
-  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>(
-    INITIAL_WORKSPACES[0].id
-  );
-
   // Modals & Overlays
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [prefilledFiles, setPrefilledFiles] = useState<File[]>([]);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
-  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [globalDragging, setGlobalDragging] = useState(false);
 
   // Upload Queue Manager
@@ -430,17 +429,16 @@ function AppShell() {
     };
   }, [uploadModalOpen, openNewModal]);
 
-  // Global Keyboard Shortcuts
+  // Global Command Palette & Search Shortcuts
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        setShortcutsOpen(false);
         setCommandPaletteOpen((o) => !o);
         return;
       }
 
-      if (commandPaletteOpen || uploadModalOpen || shortcutsOpen) return;
+      if (commandPaletteOpen || uploadModalOpen) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (isEditableElement(e.target)) return;
 
@@ -456,6 +454,11 @@ function AppShell() {
         if (key === 'l') {
           e.preventDefault();
           navigate({ view: 'library' });
+          return;
+        }
+        if (key === 'p') {
+          e.preventDefault();
+          navigate({ view: 'profile' });
           return;
         }
         if (key === 's') {
@@ -483,18 +486,12 @@ function AppShell() {
         } else {
           setCommandPaletteOpen(true);
         }
-        return;
-      }
-
-      if (e.key === '?') {
-        e.preventDefault();
-        setShortcutsOpen(true);
       }
     };
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [commandPaletteOpen, uploadModalOpen, shortcutsOpen, route.view, navigate, openNewModal]);
+  }, [commandPaletteOpen, uploadModalOpen, route.view, navigate, openNewModal]);
 
   const handleMarkAllRead = () => {
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
@@ -511,7 +508,13 @@ function AppShell() {
 
   return (
     <div className="cs-canvas relative flex min-h-screen bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
-      <LiveBackground mode={settings.liveBackground} theme={settings.theme} />
+      <LiveBackground
+        mode={settings.liveBackground}
+        theme={settings.theme}
+        opacityPercent={settings.backgroundOpacity}
+        speedMultiplier={settings.backgroundSpeed}
+        customConfig={settings.customBackground}
+      />
 
       <div className="relative z-10 flex min-h-screen w-full">
         <Sidebar
@@ -525,15 +528,9 @@ function AppShell() {
           onChangeTheme={(theme) => updateSettings({ theme })}
           liveBackground={settings.liveBackground}
           onChangeLiveBackground={(liveBackground) => updateSettings({ liveBackground })}
-          workspaces={INITIAL_WORKSPACES}
-          activeWorkspaceId={activeWorkspaceId}
-          onSelectWorkspace={(id) => {
-            setActiveWorkspaceId(id);
-            const ws = INITIAL_WORKSPACES.find((w) => w.id === id);
-            if (ws) showToast(`Switched workspace to ${ws.name}.`, 'info');
-          }}
+          profile={profile}
           onSignOut={() =>
-            showToast('Signed out of local session preview. Workspace remains active.', 'info')
+            showToast('Signed out of local session preview.', 'info')
           }
           mobileOpen={mobileMenuOpen}
           onCloseMobile={() => setMobileMenuOpen(false)}
@@ -591,21 +588,42 @@ function AppShell() {
                 <Search className="h-4 w-4" aria-hidden="true" />
               </button>
 
-              <button
-                type="button"
-                onClick={() => setShortcutsOpen(true)}
-                title="Keyboard shortcuts (?)"
-                aria-label="Keyboard shortcuts"
-                className="hidden h-8 w-8 items-center justify-center rounded-lg border border-zinc-200/80 bg-white text-zinc-600 transition-colors hover:bg-zinc-50 hover:text-zinc-900 focus-visible:outline-2 focus-visible:outline-indigo-600 sm:flex dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
-              >
-                <Keyboard className="h-4 w-4" aria-hidden="true" />
-              </button>
-
               <NotificationsMenu
                 notifications={notifications}
                 onMarkAllRead={handleMarkAllRead}
                 onSelectNotification={handleSelectNotification}
               />
+
+              <button
+                type="button"
+                onClick={() => navigate({ view: 'profile' })}
+                aria-label="Open profile"
+                title={profile.displayName}
+                className={`flex h-8 items-center gap-2 rounded-lg border px-2 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                  route.view === 'profile'
+                    ? 'cs-neon-ring border-indigo-500 bg-indigo-50/60 text-zinc-900 dark:bg-indigo-950/35 dark:text-zinc-50'
+                    : 'border-zinc-200/80 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800'
+                }`}
+              >
+                {profile.avatarUrl ? (
+                  <img
+                    src={profile.avatarUrl}
+                    alt={profile.displayName}
+                    referrerPolicy="no-referrer"
+                    className="h-5 w-5 rounded-full object-cover"
+                  />
+                ) : (
+                  <span
+                    className="flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold text-white"
+                    style={{ backgroundColor: profile.avatarColor }}
+                  >
+                    {getProfileInitials(profile.displayName, profile.email)}
+                  </span>
+                )}
+                <span className="hidden max-w-28 truncate md:inline">
+                  {profile.displayName}
+                </span>
+              </button>
 
               <button
                 type="button"
@@ -648,6 +666,18 @@ function AppShell() {
               />
             )}
 
+            {route.view === 'profile' && (
+              <ProfileView
+                profile={profile}
+                settings={settings}
+                jobs={recentJobs}
+                onUpdateProfile={updateProfile}
+                onResetProfile={resetProfile}
+                onUpdateSettings={updateSettings}
+                onNavigate={navigate}
+              />
+            )}
+
             {route.view === 'settings' && (
               <SettingsView settings={settings} onUpdateSettings={updateSettings} />
             )}
@@ -673,10 +703,7 @@ function AppShell() {
         onNewTranscription={() => openNewModal([])}
         onCycleTheme={cycleTheme}
         onCycleBackground={cycleBackground}
-        onOpenShortcuts={() => setShortcutsOpen(true)}
       />
-
-      <ShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
 
       <UploadTray
         tasks={uploadTasks}

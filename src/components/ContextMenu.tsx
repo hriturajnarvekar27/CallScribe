@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import {
   Download,
   ExternalLink,
+  FileAudio,
   Pencil,
   Pin,
   PinOff,
@@ -18,6 +19,7 @@ interface ContextMenuProps {
   onRename: (job: Job) => void;
   onTogglePin: (job: Job) => void;
   onExportMd: (job: Job) => void;
+  onDownloadAudio: (job: Job) => void;
   onReprocess: (job: Job) => void;
   onDelete: (job: Job) => void;
 }
@@ -30,6 +32,7 @@ export function ContextMenu({
   onRename,
   onTogglePin,
   onExportMd,
+  onDownloadAudio,
   onReprocess,
   onDelete,
 }: ContextMenuProps) {
@@ -121,6 +124,21 @@ export function ContextMenu({
         >
           <Download className="h-3.5 w-3.5 text-zinc-400" aria-hidden="true" />
           <span>Export Markdown</span>
+        </button>
+      )}
+
+      {job.audioUrl && (
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => {
+            onDownloadAudio(job);
+            onClose();
+          }}
+          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
+        >
+          <FileAudio className="h-3.5 w-3.5 text-zinc-400" aria-hidden="true" />
+          <span>Download audio</span>
         </button>
       )}
 

@@ -2,6 +2,7 @@ import React from 'react';
 import {
   ArrowRight,
   CheckCircle2,
+  HelpCircle,
   MessageSquareWarning,
   Minus,
   RefreshCw,
@@ -73,6 +74,12 @@ export function AnalysisTab({
       items: analysis.decisions,
       icon: CheckCircle2,
       iconClass: 'text-emerald-600 dark:text-emerald-400',
+    },
+    {
+      title: 'Questions raised',
+      items: analysis.questionsRaised,
+      icon: HelpCircle,
+      iconClass: 'text-cyan-600 dark:text-cyan-400',
     },
     {
       title: 'Client concerns',

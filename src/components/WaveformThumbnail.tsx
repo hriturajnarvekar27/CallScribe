@@ -1,17 +1,15 @@
 import React, { useMemo } from 'react';
 import { Speaker } from '../types';
-import { getDistinctSpeakerColor } from '../utils/format';
 
 interface WaveformThumbnailProps {
   jobId: string;
-  speakers: Speaker[];
+  speakers?: Speaker[];
   isProcessing?: boolean;
   isFailed?: boolean;
 }
 
 export function WaveformThumbnail({
   jobId,
-  speakers,
   isProcessing = false,
   isFailed = false,
 }: WaveformThumbnailProps) {
@@ -24,13 +22,10 @@ export function WaveformThumbnail({
     return Array.from({ length: count }, (_, idx) => {
       const seed = Math.abs(Math.sin(hash + idx * 1.73) * 43758.5453) % 1;
       const heightPct = Math.round(20 + seed * 76);
-      const spkIdx = speakers.length > 0 ? Math.floor((idx / count) * speakers.length * 3) % speakers.length : 0;
-      const color = isFailed
-        ? '#f43f5e'
-        : speakers[spkIdx]?.color || getDistinctSpeakerColor(spkIdx);
+      const color = isFailed ? '#f43f5e' : '#6366f1';
       return { heightPct, color };
     });
-  }, [jobId, speakers, isFailed]);
+  }, [jobId, isFailed]);
 
   return (
     <div

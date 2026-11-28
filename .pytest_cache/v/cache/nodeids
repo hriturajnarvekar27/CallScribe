@@ -1,0 +1,23 @@
+[
+  "backend/tests/test_diarization_and_features.py::test_cancel_preserves_partial_transcript_and_retry_honors_config",
+  "backend/tests/test_diarization_and_features.py::test_diarization_alignment_marks_low_confidence_as_unknown_speaker",
+  "backend/tests/test_diarization_and_features.py::test_diarization_alignment_overlap_beats_start_only",
+  "backend/tests/test_diarization_and_features.py::test_diarization_alignment_splits_multi_speaker_words_and_smooths_micro_interruptions",
+  "backend/tests/test_diarization_and_features.py::test_global_transcript_search_and_capabilities",
+  "backend/tests/test_diarization_and_features.py::test_patch_bookmarks_action_items_summary_confidence_and_exports",
+  "backend/tests/test_jobs_api.py::test_audio_playback_range_seeking_and_missing_files",
+  "backend/tests/test_jobs_api.py::test_delete_job_removes_record_and_file",
+  "backend/tests/test_jobs_api.py::test_download_audio_from_video_and_error_cases",
+  "backend/tests/test_jobs_api.py::test_export_all_six_formats_and_subtitle_params",
+  "backend/tests/test_jobs_api.py::test_health_and_cors_headers",
+  "backend/tests/test_jobs_api.py::test_invalid_file_uploads_rejected_cleanly",
+  "backend/tests/test_jobs_api.py::test_partial_update_preserves_segment_ids_timestamps_and_speaker_ids",
+  "backend/tests/test_jobs_api.py::test_pdf_export_preserves_english_hindi_and_marathi_unicode",
+  "backend/tests/test_jobs_api.py::test_persistence_across_application_restarts",
+  "backend/tests/test_jobs_api.py::test_regeneration_returns_501_when_unavailable_and_preserves_existing_data",
+  "backend/tests/test_jobs_api.py::test_regeneration_validation_without_fake_ai",
+  "backend/tests/test_jobs_api.py::test_speaker_rename_preserves_ids_and_colors",
+  "backend/tests/test_jobs_api.py::test_upload_list_and_retrieve_job",
+  "backend/tests/test_jobs_api.py::test_upload_remains_queued_when_ai_provider_enabled",
+  "backend/tests/test_jobs_api.py::test_upload_transitions_to_terminal_failed_when_ai_disabled_and_keeps_media"
+]

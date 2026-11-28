@@ -36,6 +36,7 @@ export function getDistinctSpeakerColor(index: number): string {
 export function getSpeakerInitials(name: string): string {
   const cleaned = name.trim();
   if (!cleaned) return '?';
+  if (/^unknown(\s+speaker)?$/i.test(cleaned)) return '?';
 
   // Prefer name inside parentheses if prefixed with "Speaker N (...)"
   const parenMatch = cleaned.match(/^Speaker\s*\d*\s*\(([^)]+)\)/i);
@@ -119,6 +120,8 @@ export function isProcessingStatus(status: JobStatus): boolean {
     status === 'queued' ||
     status === 'extracting_audio' ||
     status === 'transcribing' ||
+    status === 'diarizing' ||
+    status === 'aligning' ||
     status === 'analyzing'
   );
 }
@@ -131,12 +134,18 @@ export function getStatusLabel(status: JobStatus): string {
       return 'Extracting audio';
     case 'transcribing':
       return 'Transcribing';
+    case 'diarizing':
+      return 'Detecting speakers';
+    case 'aligning':
+      return 'Aligning transcript';
     case 'analyzing':
       return 'Analyzing';
     case 'done':
       return 'Done';
     case 'failed':
       return 'Failed';
+    case 'cancelled':
+      return 'Cancelled';
   }
 }
 

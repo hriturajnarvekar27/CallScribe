@@ -7,49 +7,217 @@
     --font-display: 'Plus Jakarta Sans', 'Inter', 'Noto Sans Devanagari', sans-serif;
     --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
+    --cs-canvas-bg: #fafafa;
+    --cs-surface-bg: rgba(255, 255, 255, 0.92);
+    --cs-sidebar-bg: rgba(244, 244, 245, 0.94);
+    --cs-border-color: rgba(228, 228, 231, 0.9);
+
     --cs-accent: #4f46e5;
     --cs-accent-hover: #4338ca;
     --cs-accent-fg: #ffffff;
     --cs-glow: rgba(79, 70, 229, 0.16);
     --cs-neon-border: rgba(99, 102, 241, 0.25);
+
+    --cs-scroll-track: rgba(244, 244, 245, 0.65);
+    --cs-scroll-thumb: rgba(79, 70, 229, 0.24);
+    --cs-scroll-thumb-hover: rgba(79, 70, 229, 0.48);
+    --cs-scroll-thumb-active: #4f46e5;
   }
 
   html {
     font-family: var(--font-sans);
     color-scheme: light;
+    scrollbar-width: thin;
+    scrollbar-color: var(--cs-scroll-thumb) var(--cs-scroll-track);
   }
 
   html.dark {
     color-scheme: dark;
+    --cs-canvas-bg: #09090b;
+    --cs-surface-bg: rgba(24, 24, 27, 0.9);
+    --cs-sidebar-bg: rgba(24, 24, 27, 0.95);
+    --cs-border-color: rgba(39, 39, 42, 0.95);
+
     --cs-accent: #6366f1;
     --cs-accent-hover: #4f46e5;
     --cs-accent-fg: #ffffff;
     --cs-glow: rgba(99, 102, 241, 0.22);
     --cs-neon-border: rgba(99, 102, 241, 0.35);
+
+    --cs-scroll-track: rgba(24, 24, 27, 0.55);
+    --cs-scroll-thumb: rgba(99, 102, 241, 0.34);
+    --cs-scroll-thumb-hover: rgba(129, 140, 248, 0.6);
+    --cs-scroll-thumb-active: #6366f1;
+  }
+
+  html[data-theme='light-warm'] {
+    color-scheme: light;
+    --cs-canvas-bg: #f8f5ef;
+    --cs-surface-bg: rgba(255, 253, 249, 0.9);
+    --cs-sidebar-bg: rgba(243, 237, 227, 0.94);
+    --cs-border-color: rgba(180, 160, 134, 0.32);
+
+    --cs-accent: #b45309;
+    --cs-accent-hover: #92400e;
+    --cs-accent-fg: #ffffff;
+    --cs-glow: rgba(180, 83, 9, 0.18);
+    --cs-neon-border: rgba(180, 83, 9, 0.32);
+
+    --cs-scroll-track: rgba(243, 237, 227, 0.78);
+    --cs-scroll-thumb: rgba(180, 83, 9, 0.28);
+    --cs-scroll-thumb-hover: rgba(180, 83, 9, 0.52);
+    --cs-scroll-thumb-active: #b45309;
+  }
+
+  html[data-theme='light-ocean'] {
+    color-scheme: light;
+    --cs-canvas-bg: #f1f7fb;
+    --cs-surface-bg: rgba(255, 255, 255, 0.9);
+    --cs-sidebar-bg: rgba(232, 242, 249, 0.94);
+    --cs-border-color: rgba(14, 116, 144, 0.18);
+
+    --cs-accent: #0284c7;
+    --cs-accent-hover: #0369a1;
+    --cs-accent-fg: #ffffff;
+    --cs-glow: rgba(2, 132, 199, 0.18);
+    --cs-neon-border: rgba(2, 132, 199, 0.32);
+
+    --cs-scroll-track: rgba(232, 242, 249, 0.78);
+    --cs-scroll-thumb: rgba(2, 132, 199, 0.28);
+    --cs-scroll-thumb-hover: rgba(2, 132, 199, 0.52);
+    --cs-scroll-thumb-active: #0284c7;
+  }
+
+  html[data-theme='midnight-indigo'] {
+    color-scheme: dark;
+    --cs-canvas-bg: #070b18;
+    --cs-surface-bg: rgba(13, 19, 38, 0.86);
+    --cs-sidebar-bg: rgba(9, 14, 29, 0.92);
+    --cs-border-color: rgba(129, 140, 248, 0.2);
+
+    --cs-accent: #818cf8;
+    --cs-accent-hover: #6366f1;
+    --cs-accent-fg: #070b18;
+    --cs-glow: rgba(129, 140, 248, 0.28);
+    --cs-neon-border: rgba(129, 140, 248, 0.42);
+
+    --cs-scroll-track: rgba(11, 16, 34, 0.72);
+    --cs-scroll-thumb: rgba(129, 140, 248, 0.36);
+    --cs-scroll-thumb-hover: rgba(129, 140, 248, 0.64);
+    --cs-scroll-thumb-active: #818cf8;
+  }
+
+  html[data-theme='forest-moss'] {
+    color-scheme: dark;
+    --cs-canvas-bg: #06100c;
+    --cs-surface-bg: rgba(10, 23, 18, 0.86);
+    --cs-sidebar-bg: rgba(7, 17, 13, 0.92);
+    --cs-border-color: rgba(52, 211, 153, 0.2);
+
+    --cs-accent: #34d399;
+    --cs-accent-hover: #10b981;
+    --cs-accent-fg: #022c22;
+    --cs-glow: rgba(52, 211, 153, 0.26);
+    --cs-neon-border: rgba(52, 211, 153, 0.4);
+
+    --cs-scroll-track: rgba(8, 20, 15, 0.72);
+    --cs-scroll-thumb: rgba(52, 211, 153, 0.34);
+    --cs-scroll-thumb-hover: rgba(52, 211, 153, 0.62);
+    --cs-scroll-thumb-active: #34d399;
+  }
+
+  html[data-theme='obsidian-rose'] {
+    color-scheme: dark;
+    --cs-canvas-bg: #0e080c;
+    --cs-surface-bg: rgba(23, 13, 20, 0.86);
+    --cs-sidebar-bg: rgba(16, 9, 14, 0.92);
+    --cs-border-color: rgba(251, 113, 133, 0.2);
+
+    --cs-accent: #fb7185;
+    --cs-accent-hover: #f43f5e;
+    --cs-accent-fg: #25060c;
+    --cs-glow: rgba(251, 113, 133, 0.28);
+    --cs-neon-border: rgba(251, 113, 133, 0.42);
+
+    --cs-scroll-track: rgba(20, 10, 17, 0.72);
+    --cs-scroll-thumb: rgba(251, 113, 133, 0.35);
+    --cs-scroll-thumb-hover: rgba(251, 113, 133, 0.64);
+    --cs-scroll-thumb-active: #fb7185;
   }
 
   html[data-theme='amoled-cyan'] {
+    --cs-canvas-bg: #000000;
     --cs-accent: #00f0ff;
     --cs-accent-hover: #06b6d4;
     --cs-accent-fg: #020617;
     --cs-glow: rgba(0, 240, 255, 0.32);
     --cs-neon-border: rgba(0, 240, 255, 0.42);
+
+    --cs-scroll-track: rgba(0, 0, 0, 0.85);
+    --cs-scroll-thumb: rgba(0, 240, 255, 0.32);
+    --cs-scroll-thumb-hover: rgba(0, 240, 255, 0.68);
+    --cs-scroll-thumb-active: #00f0ff;
   }
 
   html[data-theme='amoled-violet'] {
+    --cs-canvas-bg: #000000;
     --cs-accent: #d946ef;
     --cs-accent-hover: #c026d3;
     --cs-accent-fg: #ffffff;
     --cs-glow: rgba(217, 70, 239, 0.32);
     --cs-neon-border: rgba(217, 70, 239, 0.42);
+
+    --cs-scroll-track: rgba(0, 0, 0, 0.85);
+    --cs-scroll-thumb: rgba(217, 70, 239, 0.34);
+    --cs-scroll-thumb-hover: rgba(217, 70, 239, 0.68);
+    --cs-scroll-thumb-active: #d946ef;
   }
 
   html[data-theme='amoled-emerald'] {
+    --cs-canvas-bg: #000000;
     --cs-accent: #10b981;
     --cs-accent-hover: #059669;
     --cs-accent-fg: #022c22;
     --cs-glow: rgba(16, 185, 129, 0.32);
     --cs-neon-border: rgba(16, 185, 129, 0.42);
+
+    --cs-scroll-track: rgba(0, 0, 0, 0.85);
+    --cs-scroll-thumb: rgba(16, 185, 129, 0.34);
+    --cs-scroll-thumb-hover: rgba(16, 185, 129, 0.68);
+    --cs-scroll-thumb-active: #10b981;
+  }
+
+  html[data-theme='amoled-amber'] {
+    --cs-canvas-bg: #000000;
+    --cs-accent: #f59e0b;
+    --cs-accent-hover: #d97706;
+    --cs-accent-fg: #1c1002;
+    --cs-glow: rgba(245, 158, 11, 0.34);
+    --cs-neon-border: rgba(245, 158, 11, 0.44);
+
+    --cs-scroll-track: rgba(0, 0, 0, 0.85);
+    --cs-scroll-thumb: rgba(245, 158, 11, 0.36);
+    --cs-scroll-thumb-hover: rgba(245, 158, 11, 0.72);
+    --cs-scroll-thumb-active: #f59e0b;
+  }
+
+  html[data-theme='amoled-crimson'] {
+    --cs-canvas-bg: #000000;
+    --cs-accent: #f43f5e;
+    --cs-accent-hover: #e11d48;
+    --cs-accent-fg: #ffffff;
+    --cs-glow: rgba(244, 63, 94, 0.34);
+    --cs-neon-border: rgba(244, 63, 94, 0.44);
+
+    --cs-scroll-track: rgba(0, 0, 0, 0.85);
+    --cs-scroll-thumb: rgba(244, 63, 94, 0.36);
+    --cs-scroll-thumb-hover: rgba(244, 63, 94, 0.72);
+    --cs-scroll-thumb-active: #f43f5e;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--cs-scroll-thumb) var(--cs-scroll-track);
   }
 
   h1, h2, h3, .font-display {
@@ -59,6 +227,46 @@
   .font-mono {
     font-family: var(--font-mono);
   }
+}
+
+/* Tinted Studio & Rich Dark Theme overrides */
+html.cs-tinted body,
+html.cs-tinted .cs-canvas {
+  background-color: var(--cs-canvas-bg);
+}
+
+html.cs-tinted .cs-surface {
+  background-color: var(--cs-surface-bg);
+  backdrop-filter: blur(12px);
+  border-color: var(--cs-border-color);
+}
+
+html.cs-tinted .cs-sidebar {
+  background-color: var(--cs-sidebar-bg);
+  backdrop-filter: blur(12px);
+  border-color: var(--cs-border-color);
+}
+
+html.cs-tinted .cs-accent-btn {
+  background-color: var(--cs-accent);
+  color: var(--cs-accent-fg);
+}
+
+html.cs-tinted .cs-accent-btn:hover {
+  background-color: var(--cs-accent-hover);
+}
+
+html.cs-tinted .cs-neon-ring {
+  border-color: var(--cs-neon-border);
+  box-shadow: 0 0 0 1px var(--cs-neon-border), 0 10px 24px -10px var(--cs-glow);
+}
+
+html.cs-tinted .cs-accent-text {
+  color: var(--cs-accent);
+}
+
+html.cs-tinted .cs-progress-fill {
+  background: linear-gradient(90deg, var(--cs-accent), var(--cs-accent-hover));
 }
 
 /* Pure AMOLED Black canvas & surface overrides when AMOLED neon themes are active */
@@ -199,10 +407,39 @@ html.amoled .cs-neon-breathe {
   animation: cs-neon-breathe 3s ease-in-out infinite;
 }
 
-/* Subtle custom scrollbars */
+/* Theme-matched custom scrollbars (global + .cs-scrollbar panels) */
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--cs-scroll-track);
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--cs-scroll-thumb);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+  transition: background-color 150ms ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--cs-scroll-thumb-hover);
+}
+
+::-webkit-scrollbar-thumb:active {
+  background-color: var(--cs-scroll-thumb-active);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 .cs-scrollbar::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
 }
 
 .cs-scrollbar::-webkit-scrollbar-track {
@@ -210,12 +447,18 @@ html.amoled .cs-neon-breathe {
 }
 
 .cs-scrollbar::-webkit-scrollbar-thumb {
-  background-color: rgba(113, 113, 122, 0.28);
+  background-color: var(--cs-scroll-thumb);
   border-radius: 9999px;
+  border: 1.5px solid transparent;
+  background-clip: content-box;
 }
 
 .cs-scrollbar::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(113, 113, 122, 0.5);
+  background-color: var(--cs-scroll-thumb-hover);
+}
+
+.cs-scrollbar::-webkit-scrollbar-thumb:active {
+  background-color: var(--cs-scroll-thumb-active);
 }
 
 @media (prefers-reduced-motion: reduce) {

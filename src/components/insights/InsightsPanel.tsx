@@ -1,20 +1,27 @@
 import React, { useEffect, useState } from 'react';
-import { Compass, FileText, NotebookPen, Subtitles } from 'lucide-react';
-import { Job, NoteSection, RegenerateSection } from '../../types';
+import { Bookmark as BookmarkIcon, Compass, FileText, NotebookPen, Subtitles } from 'lucide-react';
+import { ActionItem, Bookmark, Job, NoteSection, RegenerateSection } from '../../types';
 import { AnalysisTab } from './AnalysisTab';
+import { BookmarksTab } from './BookmarksTab';
 import { NotesTab } from './NotesTab';
 import { SubtitlesTab } from './SubtitlesTab';
 import { SummaryTab } from './SummaryTab';
 
-export type InsightTabKey = 'summary' | 'notes' | 'analysis' | 'subtitles';
+export type InsightTabKey = 'summary' | 'notes' | 'analysis' | 'subtitles' | 'bookmarks';
 
 interface InsightsPanelProps {
   job: Job;
   currentTime: number;
   initialTab?: InsightTabKey;
   regeneratingSection: RegenerateSection | null;
+  aiSummarizing?: boolean;
+  enableCloudAi?: boolean;
   onRegenerate: (section: RegenerateSection) => void;
+  onAiSummarize?: () => void;
+  onUpdateSummary?: (summary: string) => void;
+  onUpdateActionItems?: (items: ActionItem[]) => void;
   onUpdateNotes: (notes: NoteSection[]) => void;
+  onUpdateBookmarks?: (bookmarks: Bookmark[]) => void;
   onSeek: (sec: number) => void;
 }
 
@@ -23,8 +30,14 @@ export function InsightsPanel({
   currentTime,
   initialTab,
   regeneratingSection,
+  aiSummarizing = false,
+  enableCloudAi = true,
   onRegenerate,
+  onAiSummarize,
+  onUpdateSummary,
+  onUpdateActionItems,
   onUpdateNotes,
+  onUpdateBookmarks,
   onSeek,
 }: InsightsPanelProps) {
   const [activeTab, setActiveTab] = useState<InsightTabKey>(initialTab ?? 'summary');
@@ -44,12 +57,13 @@ export function InsightsPanel({
     { key: 'summary', label: 'Summary', icon: FileText },
     { key: 'notes', label: 'Notes', icon: NotebookPen, count: job.notes?.length },
     { key: 'analysis', label: 'Analysis', icon: Compass },
+    { key: 'bookmarks', label: 'Bookmarks', icon: BookmarkIcon, count: job.bookmarks?.length },
     { key: 'subtitles', label: 'Subtitles', icon: Subtitles, count: job.transcript?.length },
   ];
 
   return (
     <section
-      aria-label="Analysis and subtitles"
+      aria-label="Analysis, bookmarks and subtitles"
       className="cs-surface flex h-[560px] flex-col overflow-hidden rounded-xl border border-zinc-200/90 bg-white shadow-xs lg:h-[calc(100vh-256px)] lg:min-h-[520px] dark:border-zinc-800 dark:bg-zinc-900"
     >
       {/* Tabs Header */}
@@ -92,8 +106,16 @@ export function InsightsPanel({
           <SummaryTab
             summary={job.summary}
             keyPoints={job.keyPoints}
+            actionItems={job.actionItems}
             regenerating={regeneratingSection === 'summary'}
+            aiSummarizing={aiSummarizing}
+            enableCloudAi={enableCloudAi}
+            hasTranscript={Boolean(job.transcript && job.transcript.length > 0)}
             onRegenerate={() => onRegenerate('summary')}
+            onAiSummarize={onAiSummarize}
+            onUpdateSummary={onUpdateSummary}
+            onUpdateActionItems={onUpdateActionItems}
+            onSeek={onSeek}
           />
         )}
 
@@ -114,6 +136,15 @@ export function InsightsPanel({
           />
         )}
 
+        {activeTab === 'bookmarks' && (
+          <BookmarksTab
+            bookmarks={job.bookmarks}
+            currentTime={currentTime}
+            onUpdateBookmarks={onUpdateBookmarks ?? (() => {})}
+            onSeek={onSeek}
+          />
+        )}
+
         {activeTab === 'subtitles' && (
           <SubtitlesTab job={job} currentTime={currentTime} onSeek={onSeek} />
         )}
@@ -121,3 +152,4 @@ export function InsightsPanel({
     </section>
   );
 }
+

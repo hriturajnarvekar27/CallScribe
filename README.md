@@ -65,7 +65,12 @@ All network requests flow through a single API client module (`src/api.ts`) back
 - **Response (`200`)**: Binary/text file stream with `Content-Disposition: attachment; filename="..."` (or RFC 5987 `filename*=UTF-8''...`).
 - **CORS requirement**: FastAPI CORS middleware must include `expose_headers=["Content-Disposition"]` for cross-origin filename detection.
 
-### 7. `DELETE /api/jobs/{id}`
+### 7. `GET /api/jobs/{id}/audio`
+- **Query parameters**:
+  - `format`: `"mp3" | "wav"`
+- **Response (`200`)**: Extracted or streamed audio file (`audio/mpeg` or `audio/wav`) with `Content-Disposition: attachment; filename="..."`.
+
+### 8. `DELETE /api/jobs/{id}`
 - **Response (`200` / `204`)**: Empty or status confirmation.
 
 ### Error Responses

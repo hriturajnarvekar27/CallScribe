@@ -22,7 +22,6 @@ import {
   isProcessingStatus,
 } from '../utils/format';
 import { Sparkline } from './Sparkline';
-import { SpeakerAvatarStack } from './SpeakerAvatarStack';
 import { StatusIndicator } from './StatusIndicator';
 import { useToast } from './ToastProvider';
 
@@ -253,7 +252,7 @@ export function DashboardView({
             Dashboard
           </h1>
           <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-            Transcribe video &amp; audio recordings, inspect speaker transcripts, and export subtitles.
+            Transcribe video &amp; audio recordings, inspect readable transcripts, and export subtitles.
           </p>
         </div>
 
@@ -442,7 +441,10 @@ export function DashboardView({
               </div>
               <ul className="divide-y divide-zinc-100 dark:divide-zinc-800/80">
                 {activeJobs.map((job) => {
-                  const etaSec = Math.max(2, Math.round(((100 - job.progress) / 100) * 24));
+                  const etaLabel =
+                    job.progress <= 0
+                      ? job.stageMessage || 'Starting...'
+                      : `~${Math.max(2, Math.round(((100 - job.progress) / 100) * 24))}s ETA`;
                   return (
                     <li key={job.id}>
                       <button
@@ -455,7 +457,7 @@ export function DashboardView({
                             {job.title}
                           </p>
                           <p className="mt-0.5 font-mono text-[11px] tabular-nums text-zinc-500 dark:text-zinc-400">
-                            {formatDuration(job.durationSec)} · {getLanguageLabel(job.language)} · ~{etaSec}s ETA
+                            {formatDuration(job.durationSec)} · {getLanguageLabel(job.language)} · {etaLabel}
                           </p>
                         </div>
                         <StatusIndicator status={job.status} progress={job.progress} showBar />
@@ -502,6 +504,7 @@ export function DashboardView({
               <ul className="divide-y divide-zinc-100 dark:divide-zinc-800/80">
                 {recentJobs.map((job) => {
                   const failed = job.status === 'failed';
+                  const cancelled = job.status === 'cancelled';
                   return (
                     <li
                       key={job.id}
@@ -531,7 +534,7 @@ export function DashboardView({
                             {job.title}
                           </button>
 
-                          {job.summary && !failed && (
+                          {job.summary && !failed && !cancelled && (
                             <p className="mt-0.5 line-clamp-1 text-xs text-zinc-500 dark:text-zinc-400">
                               {job.summary}
                             </p>
@@ -540,6 +543,12 @@ export function DashboardView({
                           {failed && (
                             <p title={job.error} className="mt-0.5 truncate text-xs text-rose-600 dark:text-rose-400">
                               {job.error || 'Processing failed'}
+                            </p>
+                          )}
+
+                          {cancelled && (
+                            <p className="mt-0.5 truncate text-xs text-zinc-500 dark:text-zinc-400">
+                              {job.stageMessage || 'Processing cancelled'}
                             </p>
                           )}
 
@@ -557,13 +566,15 @@ export function DashboardView({
                       </div>
 
                       <div className="flex items-center justify-between gap-2.5 pl-11 sm:justify-end sm:pl-0 shrink-0">
-                        <SpeakerAvatarStack speakers={job.speakers} maxVisible={3} />
-
-                        {failed ? (
+                        {failed || cancelled ? (
                           <button
                             type="button"
                             onClick={() => void handleRetry(job)}
-                            className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-100 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300"
+                            className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-semibold ${
+                              failed
+                                ? 'border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300'
+                                : 'border-zinc-200 bg-zinc-50 text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200'
+                            }`}
                           >
                             <RotateCw className="h-3 w-3" aria-hidden="true" />
                             <span>Retry</span>
